@@ -4,22 +4,22 @@ import android.telecom.Call
 import android.telecom.InCallService
 import android.util.Log
 
-class AppInCallService : InCallService() {
+class MyInCallService : InCallService() {
 
     override fun onCallAdded(call: Call) {
         super.onCallAdded(call)
-        Log.d("AppInCallService", "📞 Call added: ${call.details.handle}")
+        Log.d("InCallService", "📞 Call added: ${call.details.handle}")
 
         call.registerCallback(object : Call.Callback() {
             override fun onStateChanged(call: Call, state: Int) {
                 super.onStateChanged(call, state)
-                Log.d("AppInCallService", "📞 Call state changed: $state")
+                Log.d("InCallService", "📞 Call state changed: $state")
             }
         })
     }
 
     override fun onCallRemoved(call: Call) {
         super.onCallRemoved(call)
-        Log.d("AppInCallService", "🔌 Call removed.")
+        Log.d("InCallService", "🔌 Call removed/ended.")
     }
 }
