@@ -1,127 +1,230 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    
-    <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS" />
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- ========================= -->
+    <!-- TELEPHONE PERMISSIONS -->
+    <!-- ========================= -->
+
     <uses-permission android:name="android.permission.CALL_PHONE" />
+    <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS" />
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
-    <uses-permission android:name="android.permission.MANAGE_OWN_CALLS" />
+    <uses-permission android:name="android.permission.READ_CALL_LOG" />
+
+    <!-- ========================= -->
+    <!-- AUDIO -->
+    <!-- ========================= -->
+
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+
+    <!-- ========================= -->
+    <!-- CONTACTS -->
+    <!-- ========================= -->
+
     <uses-permission android:name="android.permission.READ_CONTACTS" />
+
+    <!-- ========================= -->
+    <!-- NETWORK -->
+    <!-- ========================= -->
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
 
+    <!-- ========================= -->
+    <!-- TELECOM -->
+    <!-- ========================= -->
+
+    <uses-permission android:name="android.permission.MANAGE_OWN_CALLS" />
+
+    <!-- ========================= -->
+    <!-- FOREGROUND SERVICE -->
+    <!-- ========================= -->
+
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
+
+    <uses-permission
+        android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
+
+    <uses-permission
+        android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+
+    <!-- ========================= -->
+    <!-- PRIVILEGED PERMISSIONS -->
+    <!-- Root/system-app installation -->
+    <!-- ========================= -->
+
+    <uses-permission
+        android:name="android.permission.CAPTURE_AUDIO_OUTPUT"
+        tools:ignore="ProtectedPermissions" />
+
+    <uses-permission
+        android:name="android.permission.MODIFY_PHONE_STATE"
+        tools:ignore="ProtectedPermissions" />
+
+    <uses-permission
+        android:name="android.permission.MODIFY_AUDIO_ROUTING"
+        tools:ignore="ProtectedPermissions" />
+
+    <uses-permission
+        android:name="android.permission.CONTROL_INCALL_EXPERIENCE"
+        tools:ignore="ProtectedPermissions" />
 
     <application
-        android:label="telicall_voice_app"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
-        
+        android:label="Telicall"
+        android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false"
+        android:supportsRtl="true">
+
+        <!-- ================================= -->
+        <!-- MAIN FLUTTER ACTIVITY -->
+        <!-- ================================= -->
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
             android:theme="@style/LaunchTheme"
-            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:windowSoftInputMode="adjustResize">
-            
+
             <meta-data
-              android:name="io.flutter.embedding.android.NormalTheme"
-              android:resource="@style/NormalTheme" />
-            
+                android:name="io.flutter.embedding.android.NormalTheme"
+                android:resource="@style/NormalTheme" />
+
+            <!-- Normal launcher -->
             <intent-filter>
-                <action android:name="android.intent.action.MAIN"/>
-                <category android:name="android.intent.category.LAUNCHER"/>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <!-- REQUIRED: Android DIALER ROLE -->
             <intent-filter>
                 <action android:name="android.intent.action.DIAL" />
                 <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
+            </intent-filter>
+
+            <!-- tel: dialing -->
+            <intent-filter>
+                <action android:name="android.intent.action.DIAL" />
+                <category android:name="android.intent.category.DEFAULT" />
                 <data android:scheme="tel" />
             </intent-filter>
 
+            <!-- CALL -->
             <intent-filter>
                 <action android:name="android.intent.action.CALL" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:scheme="tel" />
             </intent-filter>
 
+            <!-- CALL BUTTON -->
             <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
                 <action android:name="android.intent.action.CALL_BUTTON" />
                 <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
             </intent-filter>
+
         </activity>
+
+        <!-- ================================= -->
+        <!-- OPTIONAL ONGOING CALL ACTIVITY -->
+        <!-- ================================= -->
 
         <activity
             android:name=".OngoingCallActivity"
-            android:label="Telicall Call Screen"
+            android:label="Telicall Call"
             android:launchMode="singleInstance"
             android:excludeFromRecents="true"
-            android:exported="true"
-            android:showForAllUsers="true"
+            android:exported="false"
             android:turnScreenOn="true"
-            android:showOnLockScreen="true">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>
-        </activity>
+            android:showOnLockScreen="true" />
 
-        <activity-alias
-            android:name=".EmergencyDialer"
-            android:targetActivity=".MainActivity"
-            android:permission="android.permission.PERFORM_SIM_ACTIVATION"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="com.android.phone.action.TOUCH_DIALER" />
-                <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>
-        </activity-alias>
+        <!-- ================================= -->
+        <!-- IN CALL SERVICE -->
+        <!-- ================================= -->
 
-        <service 
+        <service
             android:name=".AppInCallService"
             android:permission="android.permission.BIND_INCALL_SERVICE"
             android:exported="true">
-            <meta-data android:name="android.telecom.IN_CALL_SERVICE_UI" android:value="true" />
-            <meta-data android:name="android.telecom.IN_CALL_SERVICE_RINGING" android:value="true" />
+
+            <meta-data
+                android:name="android.telecom.IN_CALL_SERVICE_UI"
+                android:value="true" />
+
+            <meta-data
+                android:name="android.telecom.IN_CALL_SERVICE_RINGING"
+                android:value="true" />
+
+            <meta-data
+                android:name="android.telecom.IN_CALL_SERVICE_CAR_MODE_UI"
+                android:value="false" />
+
             <intent-filter>
                 <action android:name="android.telecom.InCallService" />
             </intent-filter>
+
         </service>
 
-        <service 
+        <!-- ================================= -->
+        <!-- CONNECTION SERVICE -->
+        <!-- ================================= -->
+
+        <service
             android:name=".CallConnectionService"
             android:permission="android.permission.BIND_TELECOM_CONNECTION_SERVICE"
             android:exported="true">
+
             <intent-filter>
                 <action android:name="android.telecom.ConnectionService" />
             </intent-filter>
+
         </service>
 
-        <receiver 
-            android:name=".CallReceiver" 
+        <!-- ================================= -->
+        <!-- PHONE STATE RECEIVER -->
+        <!-- ================================= -->
+
+        <receiver
+            android:name=".CallReceiver"
             android:exported="true">
+
             <intent-filter>
                 <action android:name="android.intent.action.PHONE_STATE" />
             </intent-filter>
+
         </receiver>
 
+        <!-- Flutter embedding -->
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+
     </application>
 
+    <!-- ========================= -->
+    <!-- PACKAGE VISIBILITY -->
+    <!-- ========================= -->
+
     <queries>
+
         <intent>
-            <action android:name="android.intent.action.PROCESS_TEXT"/>
-            <data android:mimeType="text/plain"/>
+            <action android:name="android.intent.action.DIAL" />
+            <data android:scheme="tel" />
         </intent>
+
+        <intent>
+            <action android:name="android.intent.action.CALL" />
+            <data android:scheme="tel" />
+        </intent>
+
+        <intent>
+            <action android:name="android.intent.action.PROCESS_TEXT" />
+            <data android:mimeType="text/plain" />
+        </intent>
+
     </queries>
+
 </manifest>

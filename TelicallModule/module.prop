@@ -1,0 +1,6 @@
+id=telicall_voice_system
+name=Telicall Voice System App
+version=v1.0.0
+versionCode=1
+author=Ikramul
+description=Injects Telicall Voice as a privileged system app for in-call audio recording.
