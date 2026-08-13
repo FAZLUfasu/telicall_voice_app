@@ -3,7 +3,10 @@
     <privapp-permissions package="com.example.telicall_voice_app">
         <!-- Audio Capture & Routing Privileges -->
         <permission name="android.permission.CAPTURE_AUDIO_OUTPUT"/>
+        <permission name="android.permission.CAPTURE_AUDIO_HOTWORD"/>
         <permission name="android.permission.MODIFY_AUDIO_ROUTING"/>
+        <permission name="android.permission.MODIFY_AUDIO_SETTINGS"/>
+        <permission name="android.permission.RECORD_AUDIO"/>
         <permission name="android.permission.CONTROL_INCALL_EXPERIENCE"/>
         
         <!-- Telephony Privileges -->

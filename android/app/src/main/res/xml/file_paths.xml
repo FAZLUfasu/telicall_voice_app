@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Internal application storage (call_recordings directory) -->
+    <files-path name="call_recordings" path="call_recordings/" />
+    <!-- App internal files root -->
+    <files-path name="internal_files" path="." />
+    <!-- External cache and files for audio sharing -->
+    <external-files-path name="external_files" path="." />
+    <cache-path name="cache" path="." />
+</paths>

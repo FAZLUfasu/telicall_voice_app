@@ -1,5 +1,4 @@
-import 'dart:async';
-import 'package:http/http.dart' as http;
+import 'package:http/http.dart' as http show get;
 import 'package:flutter/foundation.dart';
 
 class ApiService {

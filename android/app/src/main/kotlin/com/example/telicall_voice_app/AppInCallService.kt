@@ -1,34 +1,33 @@
 package com.example.telicall_voice_app
 
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.telecom.Call
 import android.telecom.InCallService
 import android.util.Log
+import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.io.RandomAccessFile
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.math.abs
+import kotlin.math.max
 
 class AppInCallService : InCallService() {
 
     companion object {
+        private const val TAG = "AppInCallService"
 
-        private const val TAG =
-            "AppInCallService"
-
-        private const val ACTION_CALL_ANSWERED =
-            "com.example.telicall_voice_app.CALL_ANSWERED"
-
-        private const val ACTION_CALL_ENDED =
-            "com.example.telicall_voice_app.CALL_ENDED"
-
-        private const val ACTION_PCM_FRAME =
+        const val ACTION_PCM_FRAME =
             "com.example.telicall_voice_app.PCM_DOWNLINK_FRAME"
-
-        private const val ACTION_INJECT_AUDIO =
-            "com.example.telicall_voice_app.INJECT_UPLINK_AUDIO"
 
         private const val SAMPLE_RATE = 16000
 
@@ -40,550 +39,492 @@ class AppInCallService : InCallService() {
     }
 
     private var currentCall: Call? = null
-
-    private var audioExecutor: ExecutorService? = null
-
-    private val audioRunning =
-        AtomicBoolean(false)
+    private var callCallback: Call.Callback? = null
 
     private var audioRecord: AudioRecord? = null
+    private var audioExecutor: ExecutorService? = null
+    private val audioRunning = AtomicBoolean(false)
 
-    // ============================================================
-    // SERVICE CREATED
-    // ============================================================
+    // System Audio & AI Management
+    private var audioManager: AudioManager? = null
+
+    // WAV Storage Trackers
+    private var wavFile: File? = null
+    private var wavOutput: FileOutputStream? = null
+    private var wavDataSize: Long = 0
+    private val sessionChunkFiles = mutableListOf<File>()
+
+    // Broadcast Listener for AI Mode
+    private val aiModeReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            val enable = intent?.getBooleanExtra("enable_ai", false) ?: false
+            if (enable) {
+                enableAiMode()
+            } else {
+                disableAiMode()
+            }
+        }
+    }
 
     override fun onCreate() {
-
         super.onCreate()
+        Log.i(TAG, "================================")
+        Log.i(TAG, "🚀 AppInCallService CREATED")
+        Log.i(TAG, "Package = $packageName")
+        Log.i(TAG, "================================")
 
-        Log.i(
-            TAG,
-            "================================"
-        )
-
-        Log.i(
-            TAG,
-            "🚀 AppInCallService CREATED"
-        )
-
-        Log.i(
-            TAG,
-            "Package = $packageName"
-        )
-
-        Log.i(
-            TAG,
-            "================================"
-        )
-    }
-
-    // ============================================================
-    // SERVICE DESTROYED
-    // ============================================================
-
-    override fun onDestroy() {
-
-        Log.i(
-            TAG,
-            "🛑 AppInCallService DESTROYED"
-        )
-
-        stopAudioCapture()
-
-        currentCall = null
-
-        super.onDestroy()
-    }
-
-    // ============================================================
-    // CALL ADDED
-    // ============================================================
-
-    override fun onCallAdded(call: Call) {
-
-        super.onCallAdded(call)
-
-        Log.i(
-            TAG,
-            "📞 ================================="
-        )
-
-        Log.i(
-            TAG,
-            "📞 onCallAdded()"
-        )
-
-        Log.i(
-            TAG,
-            "📞 Call = $call"
-        )
-
-        Log.i(
-            TAG,
-            "📞 State = ${call.state}"
-        )
-
-        Log.i(
-            TAG,
-            "📞 Details = ${call.details}"
-        )
-
-        Log.i(
-            TAG,
-            "📞 ================================="
-        )
-
-        currentCall = call
-
-        call.registerCallback(
-            callCallback
-        )
-
-        handleCallState(
-            call,
-            call.state
-        )
-    }
-
-    // ============================================================
-    // CALL REMOVED
-    // ============================================================
-
-    override fun onCallRemoved(call: Call) {
-
-        Log.i(
-            TAG,
-            "🔴 onCallRemoved()"
-        )
-
-        stopAudioCapture()
-
-        sendBroadcast(
-            Intent(ACTION_CALL_ENDED).apply {
-                setPackage(packageName)
-            }
-        )
+        audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
         try {
-
-            call.unregisterCallback(
-                callCallback
+            registerReceiver(
+                aiModeReceiver,
+                IntentFilter("com.example.telicall_voice_app.TOGGLE_AI_MODE")
             )
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Failed to register AI Mode receiver", e)
+        }
+    }
 
-        } catch (_: Exception) {
+    override fun onCallAdded(call: Call) {
+        super.onCallAdded(call)
+        currentCall = call
+
+        Log.i(TAG, "📞 onCallAdded() | State = ${call.state}")
+        logCallState(call.state)
+
+        callCallback = object : Call.Callback() {
+            override fun onStateChanged(call: Call, state: Int) {
+                Log.i(TAG, "📱 CALL STATE CHANGED = $state")
+                logCallState(state)
+
+                when (state) {
+                    Call.STATE_ACTIVE -> {
+                        Log.i(TAG, "🟢 CALL ACTIVE")
+                        startAudioCapture()
+                    }
+                    Call.STATE_DISCONNECTED -> {
+                        Log.i(TAG, "🔴 CALL DISCONNECTED")
+                        stopAudioCapture()
+                    }
+                }
+            }
         }
 
-        if (currentCall == call) {
+        call.registerCallback(callCallback!!)
 
+        if (call.state == Call.STATE_ACTIVE) {
+            Log.i(TAG, "🟢 Call already ACTIVE")
+            startAudioCapture()
+        }
+    }
+
+    override fun onCallRemoved(call: Call) {
+        Log.i(TAG, "🔴 onCallRemoved()")
+        if (call == currentCall) {
+            stopAudioCapture()
+            finalizeSessionRecording()
+
+            callCallback?.let {
+                try {
+                    call.unregisterCallback(it)
+                } catch (e: Exception) {
+                    Log.e(TAG, "❌ Failed to unregister callback", e)
+                }
+            }
+            callCallback = null
             currentCall = null
         }
-
         super.onCallRemoved(call)
     }
 
-    // ============================================================
-    // CALL CALLBACK
-    // ============================================================
-
-    private val callCallback =
-        object : Call.Callback() {
-
-            override fun onStateChanged(
-                call: Call,
-                state: Int
-            ) {
-
-                Log.i(
-                    TAG,
-                    "📱 CALL STATE = ${stateToString(state)}"
-                )
-
-                handleCallState(
-                    call,
-                    state
-                )
-            }
-
-            override fun onDetailsChanged(
-                call: Call,
-                details: Call.Details
-            ) {
-
-                Log.i(
-                    TAG,
-                    "📱 Call details changed"
-                )
-            }
-        }
-
-    // ============================================================
-    // HANDLE CALL STATE
-    // ============================================================
-
-
-    private fun handleCallState(
-        call: Call,
-        state: Int
-    ) {
-
+    private fun logCallState(state: Int) {
         when (state) {
-
-            Call.STATE_NEW -> {
-
-                Log.i(
-                    TAG,
-                    "🆕 CALL NEW"
-                )
-            }
-
-            Call.STATE_RINGING -> {
-
-                Log.i(
-                    TAG,
-                    "🔔 CALL RINGING"
-                )
-            }
-
-            Call.STATE_DIALING -> {
-
-                Log.i(
-                    TAG,
-                    "📤 CALL DIALING"
-                )
-            }
-
-            Call.STATE_CONNECTING -> {
-
-                Log.i(
-                    TAG,
-                    "🔌 CALL CONNECTING"
-                )
-            }
-
-            Call.STATE_ACTIVE -> {
-
-                Log.i(
-                    TAG,
-                    "🟢 ================================="
-                )
-
-                Log.i(
-                    TAG,
-                    "🟢 CALL ACTIVE"
-                )
-
-                Log.i(
-                    TAG,
-                    "🟢 ================================="
-
-                )
-
-                sendBroadcast(
-                    Intent(
-                        ACTION_CALL_ANSWERED
-                    ).apply {
-                        setPackage(packageName)
-                    }
-                )
-
-                /*
-                * IMPORTANT:
-                *
-                * Start the AI audio pipeline ONLY after
-                * Telecom reports STATE_ACTIVE.
-                */
-                startAudioCapture()
-            }
-
-            Call.STATE_HOLDING -> {
-
-                Log.i(
-                    TAG,
-                    "⏸ CALL HOLDING"
-                )
-            }
-
-            Call.STATE_DISCONNECTED -> {
-
-                Log.i(
-                    TAG,
-                    "🔴 CALL DISCONNECTED"
-                )
-
-                stopAudioCapture()
-            }
-
-            Call.STATE_SELECT_PHONE_ACCOUNT -> {
-
-                Log.i(
-                    TAG,
-                    "📱 SELECT PHONE ACCOUNT"
-                )
-            }
-
-            else -> {
-
-                Log.i(
-                    TAG,
-                    "📞 CALL STATE: $state"
-                )
-            }
+            Call.STATE_NEW -> Log.i(TAG, "📱 CALL STATE = NEW")
+            Call.STATE_CONNECTING -> Log.i(TAG, "📱 CALL STATE = CONNECTING")
+            Call.STATE_DIALING -> Log.i(TAG, "📱 CALL STATE = DIALING")
+            Call.STATE_RINGING -> Log.i(TAG, "📱 CALL STATE = RINGING")
+            Call.STATE_ACTIVE -> Log.i(TAG, "📱 CALL STATE = ACTIVE")
+            Call.STATE_HOLDING -> Log.i(TAG, "📱 CALL STATE = HOLDING")
+            Call.STATE_DISCONNECTED -> Log.i(TAG, "📱 CALL STATE = DISCONNECTED")
+            Call.STATE_DISCONNECTING -> Log.i(TAG, "📱 CALL STATE = DISCONNECTING")
+            else -> Log.i(TAG, "📱 CALL STATE = UNKNOWN($state)")
         }
     }
 
-
     // ============================================================
-    // STATE STRING
+    // AI MODE AUDIO CONTROLS
     // ============================================================
 
-
-    private fun stateToString(
-        state: Int
-    ): String {
-
-        return when (state) {
-
-            Call.STATE_NEW ->
-                "NEW"
-
-            Call.STATE_CONNECTING ->
-                "CONNECTING"
-
-            Call.STATE_DIALING ->
-                "DIALING"
-
-            Call.STATE_RINGING ->
-                "RINGING"
-
-            Call.STATE_ACTIVE ->
-                "ACTIVE"
-
-            Call.STATE_HOLDING ->
-                "HOLDING"
-
-            Call.STATE_DISCONNECTED ->
-                "DISCONNECTED"
-
-            Call.STATE_SELECT_PHONE_ACCOUNT ->
-                "SELECT_PHONE_ACCOUNT"
-
-            else ->
-                "UNKNOWN($state)"
+    fun enableAiMode() {
+        try {
+            audioManager?.let { am ->
+                am.isMicrophoneMute = true
+                am.isSpeakerphoneOn = false
+                am.setStreamVolume(AudioManager.STREAM_VOICE_CALL, 0, 0)
+                Log.i(TAG, "🤖 AI Mode ENABLED: Mic muted & speaker silenced")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Failed to enable AI Mode mute", e)
         }
     }
 
+    fun disableAiMode() {
+        try {
+            audioManager?.let { am ->
+                am.isMicrophoneMute = false
+                val maxVol = am.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL)
+                am.setStreamVolume(AudioManager.STREAM_VOICE_CALL, maxVol / 2, 0)
+                Log.i(TAG, "👤 AI Mode DISABLED: Mic & speaker restored")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Failed to disable AI Mode mute", e)
+        }
+    }
 
     // ============================================================
-    // AUDIO CAPTURE
+    // START AUDIO CAPTURE (VOICE_DOWNLINK PRIORITY)
     // ============================================================
 
     private fun startAudioCapture() {
-
-        if (
-            audioRunning.get()
-        ) {
-
-            Log.i(
-                TAG,
-                "🎙 Audio capture already running"
-            )
-
+        if (audioRunning.get()) {
+            Log.i(TAG, "🎙 Audio capture already running")
             return
         }
 
-        Log.i(
-            TAG,
-            "🎙 Starting audio pipeline"
+        Log.i(TAG, "🎙 Starting audio pipeline")
+
+        val minBuffer = AudioRecord.getMinBufferSize(
+            SAMPLE_RATE,
+            CHANNEL_CONFIG,
+            AUDIO_FORMAT
         )
 
-        val minBuffer =
-            AudioRecord.getMinBufferSize(
-                SAMPLE_RATE,
-                CHANNEL_CONFIG,
-                AUDIO_FORMAT
-            )
-
-        if (
-            minBuffer <= 0
-        ) {
-
-            Log.e(
-                TAG,
-                "❌ Invalid AudioRecord buffer size"
-            )
-
+        if (minBuffer <= 0) {
+            Log.e(TAG, "❌ Invalid AudioRecord buffer size: $minBuffer")
             return
         }
 
-        val bufferSize =
-            maxOf(
-                minBuffer * 2,
-                4096
-            )
+        val bufferSize = max(minBuffer * 2, 4096)
 
         try {
+            startWavRecording()
 
-            audioRecord =
-                AudioRecord(
-                    MediaRecorder.AudioSource.VOICE_RECOGNITION,
-                    SAMPLE_RATE,
-                    CHANNEL_CONFIG,
-                    AUDIO_FORMAT,
-                    bufferSize
-                )
+            // VOICE_DOWNLINK (3) prioritized to target caller audio
+            val preferredSources = intArrayOf(
+                MediaRecorder.AudioSource.VOICE_DOWNLINK,      // 3
+                MediaRecorder.AudioSource.VOICE_CALL,          // 4
+                MediaRecorder.AudioSource.VOICE_COMMUNICATION  // 7
+            )
 
-            if (
-                audioRecord?.state !=
-                AudioRecord.STATE_INITIALIZED
-            ) {
+            var initializedRecord: AudioRecord? = null
 
-                Log.e(
-                    TAG,
-                    "❌ AudioRecord failed to initialize"
-                )
+            for (source in preferredSources) {
+                try {
+                    Log.i(TAG, "🔄 Attempting AudioRecord with AudioSource: $source")
+                    val rec = AudioRecord(
+                        source,
+                        SAMPLE_RATE,
+                        CHANNEL_CONFIG,
+                        AUDIO_FORMAT,
+                        bufferSize
+                    )
 
+                    if (rec.state == AudioRecord.STATE_INITIALIZED) {
+                        initializedRecord = rec
+                        Log.i(TAG, "✅ AudioRecord initialized successfully with AudioSource: $source")
+                        break
+                    } else {
+                        rec.release()
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "⚠️ Failed source $source: ${e.message}")
+                }
+            }
+
+            audioRecord = initializedRecord
+
+            if (audioRecord == null || audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
+                Log.e(TAG, "❌ AudioRecord failed to initialize across all AudioSources")
                 audioRecord?.release()
                 audioRecord = null
-
+                stopWavRecording()
                 return
             }
 
             audioRunning.set(true)
-
             audioRecord?.startRecording()
 
-            audioExecutor =
-                Executors.newSingleThreadExecutor()
-
+            audioExecutor = Executors.newSingleThreadExecutor()
             audioExecutor?.execute {
-
-                audioCaptureLoop(
-                    bufferSize
-                )
+                audioCaptureLoop(bufferSize)
             }
 
-            Log.i(
-                TAG,
-                "🎙 Audio capture started"
-            )
+            Log.i(TAG, "🎙 Audio capture thread launched successfully")
 
         } catch (e: Exception) {
-
-            Log.e(
-                TAG,
-                "❌ AudioRecord start failed",
-                e
-            )
-
+            Log.e(TAG, "❌ AudioRecord start failed", e)
             stopAudioCapture()
         }
     }
 
-    // ============================================================
-    // AUDIO LOOP
-    // ============================================================
+    private fun calculateMaxAmplitude(pcm: ByteArray): Int {
+        var maxAmplitude = 0
+        var i = 0
+        while (i + 1 < pcm.size) {
+            val low = pcm[i].toInt() and 0xFF
+            val high = pcm[i + 1].toInt()
+            val sample = (high shl 8) or low
+            val amplitude = abs(sample.toShort().toInt())
 
-    private fun audioCaptureLoop(
-        bufferSize: Int
-    ) {
-
-        val buffer =
-            ByteArray(bufferSize)
-
-        while (
-            audioRunning.get()
-        ) {
-
-            try {
-
-                val count =
-                    audioRecord?.read(
-                        buffer,
-                        0,
-                        buffer.size
-                    ) ?: -1
-
-                if (count > 0) {
-
-                    val pcm =
-                        buffer.copyOf(count)
-
-                    sendBroadcast(
-                        Intent(
-                            ACTION_PCM_FRAME
-                        ).apply {
-
-                            setPackage(
-                                packageName
-                            )
-
-                            putExtra(
-                                "pcm_bytes",
-                                pcm
-                            )
-                        }
-                    )
-                }
-
-            } catch (e: Exception) {
-
-                Log.e(
-                    TAG,
-                    "❌ Audio capture loop error",
-                    e
-                )
-
-                break
+            if (amplitude > maxAmplitude) {
+                maxAmplitude = amplitude
             }
+            i += 2
         }
-
-        Log.i(
-            TAG,
-            "🎙 Audio capture loop stopped"
-        )
+        return maxAmplitude
     }
 
     // ============================================================
-    // STOP AUDIO
+    // AUDIO RECORD LOOP
     // ============================================================
 
+    private fun audioCaptureLoop(bufferSize: Int) {
+        val buffer = ByteArray(2048)
+        var readCount = 0
+
+        Log.i(TAG, "🎙 Audio Capture Loop Active")
+
+        while (audioRunning.get()) {
+            val count = audioRecord?.read(buffer, 0, buffer.size) ?: -1
+
+            if (count > 0) {
+                readCount++
+                val pcm = buffer.copyOf(count)
+
+                writeWavData(pcm)
+
+                if (readCount % 50 == 0) {
+                    val maxAmp = calculateMaxAmplitude(pcm)
+                    Log.d(TAG, "🎙 Frame #$readCount ($count bytes) | Max Amp: $maxAmp")
+                }
+
+                sendBroadcast(Intent(ACTION_PCM_FRAME).apply {
+                    putExtra("pcm_bytes", pcm)
+                })
+            } else {
+                try {
+                    Thread.sleep(10)
+                } catch (_: InterruptedException) {
+                    break
+                }
+            }
+        }
+
+        Log.i(TAG, "🎙 Audio capture loop terminated")
+    }
+
+    // ============================================================
+    // WAV FILE HANDLING & MERGING LOGIC
+    // ============================================================
+
+    private fun startWavRecording() {
+        try {
+            val directory = File(filesDir, "call_recordings")
+            if (!directory.exists()) {
+                directory.mkdirs()
+            }
+
+            val filename = "chunk_${System.currentTimeMillis()}.wav"
+            wavFile = File(directory, filename)
+            wavOutput = FileOutputStream(wavFile)
+            wavDataSize = 0
+
+            wavOutput?.write(ByteArray(44))
+            wavFile?.let { sessionChunkFiles.add(it) }
+            Log.i(TAG, "💾 WAV chunk initialized: ${wavFile?.absolutePath}")
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Failed to create WAV file", e)
+        }
+    }
+
+    private fun writeWavData(pcm: ByteArray) {
+        try {
+            wavOutput?.write(pcm)
+            wavDataSize += pcm.size
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ WAV write failed", e)
+        }
+    }
+
+    private fun stopWavRecording() {
+        val file = wavFile ?: return
+        val output = wavOutput ?: return
+
+        try {
+            output.flush()
+            output.close()
+            wavOutput = null
+
+            RandomAccessFile(file, "rw").use { raf ->
+                raf.seek(0)
+                raf.writeBytes("RIFF")
+                raf.writeInt(Integer.reverseBytes((36 + wavDataSize).toInt()))
+                raf.writeBytes("WAVE")
+                raf.writeBytes("fmt ")
+                raf.writeInt(Integer.reverseBytes(16))
+                raf.writeShort(java.lang.Short.reverseBytes(1.toShort()).toInt())
+                raf.writeShort(java.lang.Short.reverseBytes(1.toShort()).toInt())
+                raf.writeInt(Integer.reverseBytes(SAMPLE_RATE))
+                raf.writeInt(Integer.reverseBytes(SAMPLE_RATE * 2))
+                raf.writeShort(java.lang.Short.reverseBytes(2.toShort()).toInt())
+                raf.writeShort(java.lang.Short.reverseBytes(16.toShort()).toInt())
+                raf.writeBytes("data")
+                raf.writeInt(Integer.reverseBytes(wavDataSize.toInt()))
+            }
+
+            Log.i(TAG, "💾 Chunk Saved cleanly: ${file.absolutePath} ($wavDataSize bytes)")
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Failed to finalize WAV header", e)
+        } finally {
+            wavFile = null
+            wavOutput = null
+            wavDataSize = 0
+        }
+    }
+
+    private fun finalizeSessionRecording() {
+        if (sessionChunkFiles.isEmpty()) return
+
+        val directory = File(filesDir, "call_recordings")
+        val finalFile = File(directory, "call_recording_${System.currentTimeMillis()}.wav")
+
+        if (sessionChunkFiles.size == 1) {
+            val singleChunk = sessionChunkFiles[0]
+            if (singleChunk.exists()) {
+                singleChunk.renameTo(finalFile)
+                Log.i(TAG, "💾 Single session recording finalized: ${finalFile.absolutePath}")
+            }
+        } else {
+            mergeWavFiles(sessionChunkFiles, finalFile)
+        }
+
+        sessionChunkFiles.clear()
+    }
+
+    private fun mergeWavFiles(inputFiles: List<File>, outputFile: File) {
+        var totalAudioLen: Long = 0
+        inputFiles.forEach { file ->
+            if (file.exists() && file.length() > 44) {
+                totalAudioLen += (file.length() - 44)
+            }
+        }
+
+        val totalDataLen = totalAudioLen + 36
+        val byteRate = (SAMPLE_RATE * 1 * 2).toLong()
+
+        try {
+            val out = FileOutputStream(outputFile)
+
+            val header = ByteArray(44)
+            header[0] = 'R'.code.toByte(); header[1] = 'I'.code.toByte()
+            header[2] = 'F'.code.toByte(); header[3] = 'F'.code.toByte()
+
+            header[4] = (totalDataLen and 0xFFL).toByte()
+            header[5] = ((totalDataLen shr 8) and 0xFFL).toByte()
+            header[6] = ((totalDataLen shr 16) and 0xFFL).toByte()
+            header[7] = ((totalDataLen shr 24) and 0xFFL).toByte()
+
+            header[8] = 'W'.code.toByte(); header[9] = 'A'.code.toByte()
+            header[10] = 'V'.code.toByte(); header[11] = 'E'.code.toByte()
+            header[12] = 'f'.code.toByte(); header[13] = 'm'.code.toByte()
+            header[14] = 't'.code.toByte(); header[15] = ' '.code.toByte()
+
+            header[16] = 16; header[17] = 0; header[18] = 0; header[19] = 0
+            header[20] = 1; header[21] = 0 // PCM
+            header[22] = 1; header[23] = 0 // Mono
+
+            header[24] = (SAMPLE_RATE and 0xFF).toByte()
+            header[25] = ((SAMPLE_RATE shr 8) and 0xFF).toByte()
+            header[26] = ((SAMPLE_RATE shr 16) and 0xFF).toByte()
+            header[27] = ((SAMPLE_RATE shr 24) and 0xFF).toByte()
+
+            header[28] = (byteRate and 0xFFL).toByte()
+            header[29] = ((byteRate shr 8) and 0xFFL).toByte()
+            header[30] = ((byteRate shr 16) and 0xFFL).toByte()
+            header[31] = ((byteRate shr 24) and 0xFFL).toByte()
+
+            header[32] = 2; header[33] = 0
+            header[34] = 16; header[35] = 0
+
+            header[36] = 'd'.code.toByte(); header[37] = 'a'.code.toByte()
+            header[38] = 't'.code.toByte(); header[39] = 'a'.code.toByte()
+
+            header[40] = (totalAudioLen and 0xFFL).toByte()
+            header[41] = ((totalAudioLen shr 8) and 0xFFL).toByte()
+            header[42] = ((totalAudioLen shr 16) and 0xFFL).toByte()
+            header[43] = ((totalAudioLen shr 24) and 0xFFL).toByte()
+
+            out.write(header, 0, 44)
+
+            val buffer = ByteArray(2048)
+            for (file in inputFiles) {
+                if (!file.exists() || file.length() <= 44) continue
+                val inputStream = FileInputStream(file)
+                inputStream.skip(44)
+
+                var bytesRead: Int
+                while (inputStream.read(buffer).also { bytesRead = it } != -1) {
+                    out.write(buffer, 0, bytesRead)
+                }
+                inputStream.close()
+            }
+
+            out.close()
+
+            inputFiles.forEach { file -> if (file.exists()) file.delete() }
+            Log.i(TAG, "💾 Successfully merged ${inputFiles.size} chunks into single file: ${outputFile.absolutePath}")
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Failed to merge WAV chunk files", e)
+        }
+    }
+
     private fun stopAudioCapture() {
-
-        if (
-            !audioRunning.getAndSet(false)
-        ) {
-
+        if (!audioRunning.get()) {
+            stopWavRecording()
             return
         }
 
-        Log.i(
-            TAG,
-            "🛑 Stopping audio capture"
-        )
+        Log.i(TAG, "🛑 Stopping audio capture")
+        audioRunning.set(false)
 
         try {
-
             audioRecord?.stop()
-
-        } catch (_: Exception) {
-        }
-
-        try {
-
             audioRecord?.release()
-
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ AudioRecord release error", e)
         }
-
         audioRecord = null
 
         try {
-
             audioExecutor?.shutdownNow()
-
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Executor shutdown error", e)
         }
-
         audioExecutor = null
+
+        stopWavRecording()
+        Log.i(TAG, "🛑 Audio capture stopped completely")
+    }
+
+    override fun onDestroy() {
+        Log.i(TAG, "🛑 AppInCallService DESTROYED")
+        try {
+            unregisterReceiver(aiModeReceiver)
+        } catch (_: Exception) {}
+        
+        stopAudioCapture()
+        finalizeSessionRecording()
+        disableAiMode()
+        super.onDestroy()
     }
 }

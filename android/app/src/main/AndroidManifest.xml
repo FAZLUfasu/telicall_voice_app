@@ -53,7 +53,8 @@
     <!-- PRIVILEGED PERMISSIONS -->
     <!-- Root/system-app installation -->
     <!-- ========================= -->
-
+  
+   
     <uses-permission
         android:name="android.permission.CAPTURE_AUDIO_OUTPUT"
         tools:ignore="ProtectedPermissions" />
@@ -187,6 +188,16 @@
         <!-- PHONE STATE RECEIVER -->
         <!-- ================================= -->
 
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
         <receiver
             android:name=".CallReceiver"
             android:exported="true">
@@ -203,7 +214,7 @@
             android:value="2" />
 
     </application>
-
+    
     <!-- ========================= -->
     <!-- PACKAGE VISIBILITY -->
     <!-- ========================= -->
