@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:permission_handler/permission_handler.dart';
-import 'package:flutter_contacts/flutter_contacts.dart' hide PermissionStatus;
+import 'package:flutter_contacts/flutter_contacts.dart' as fc;
 import 'package:url_launcher/url_launcher.dart';
 
 import '../models.dart';
@@ -36,8 +36,8 @@ class DialerController extends ChangeNotifier {
   Timer? _callTimer;
   int callDurationSeconds = 0;
 
-  List<Contact> deviceContacts = [];
-  List<Contact> filteredContacts = [];
+  List<fc.Contact> deviceContacts = [];
+  List<fc.Contact> filteredContacts = [];
   bool isLoadingContacts = false;
   bool hasContactsPermission = false;
   final TextEditingController searchController = TextEditingController();
@@ -187,58 +187,53 @@ class DialerController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final status = await FlutterContacts.permissions.request(
-        PermissionType.read,
+      final permission = await fc.FlutterContacts.permissions.request(
+        fc.PermissionType.read,
       );
-      if (status == PermissionStatus.granted) {
-        List<Contact> contacts = await FlutterContacts.getAll(
-          properties: {ContactProperty.name, ContactProperty.phone},
+
+      if (permission == fc.PermissionStatus.granted) {
+        final contacts = await fc.FlutterContacts.getAll(
+          properties: {fc.ContactProperty.name, fc.ContactProperty.phone},
         );
+
         deviceContacts = contacts;
-        filteredContacts = contacts;
+        filteredContacts = List<fc.Contact>.from(contacts);
         hasContactsPermission = true;
       } else {
         hasContactsPermission = false;
       }
-    } catch (_) {}
+    } catch (e, stackTrace) {
+      debugPrint('❌ Contact loading error: $e');
+      debugPrint('$stackTrace');
+      hasContactsPermission = false;
+    }
+
     isLoadingContacts = false;
     notifyListeners();
   }
 
   void filterContactsList() {
     final query = searchController.text.toLowerCase().trim();
+
+    if (query.isEmpty) {
+      filteredContacts = List<fc.Contact>.from(deviceContacts);
+      notifyListeners();
+      return;
+    }
+
     filteredContacts = deviceContacts.where((contact) {
       final name = (contact.displayName ?? '').toLowerCase();
-      final phones = contact.phones
-          .map((p) => p.number.replaceAll(RegExp(r'\s+'), ''))
-          .join();
-      return name.contains(query) || phones.contains(query);
+
+      final phoneNumbers = contact.phones.map((phone) {
+        return phone.number.replaceAll(RegExp(r'[\s\-\(\)]'), '');
+      });
+
+      return name.contains(query) ||
+          phoneNumbers.any((number) => number.contains(query));
     }).toList();
+
     notifyListeners();
   }
-
-  // Future<void> fetchAiCallQueue([String? statusFilter]) async {
-  //   isLoadingQueue = true;
-  //   notifyListeners();
-
-  //   final String filter = statusFilter ?? selectedStatusFilter;
-  //   try {
-  //     final response = await http.get(
-  //       Uri.parse("$baseUrl/api/call-queue/?status=$filter"),
-  //     );
-  //     if (response.statusCode == 200) {
-  //       selectedStatusFilter = filter;
-  //       final List<dynamic> data = jsonDecode(response.body);
-  //       aiCallQueue = data
-  //           .map((item) => ContactQueueItem.fromJson(item))
-  //           .toList();
-  //     }
-  //   } catch (e) {
-  //     debugPrint("❌ Error fetching queue ($filter): $e");
-  //   }
-  //   isLoadingQueue = false;
-  //   notifyListeners();
-  // }
 
   Future<void> fetchAiCallQueue([String? statusFilter]) async {
     final String filter = (statusFilter ?? selectedStatusFilter).toUpperCase();
@@ -333,19 +328,6 @@ class DialerController extends ChangeNotifier {
     }
   }
 
-  // Future<void> updateLeadStatus(int id, String status) async {
-  //   try {
-  //     await http.patch(
-  //       Uri.parse("$baseUrl/api/call-queue/$id/update/"),
-  //       headers: {"Content-Type": "application/json"},
-  //       body: jsonEncode({"status": status}),
-  //     );
-  //     fetchAiCallQueue(selectedStatusFilter);
-  //     fetchAnalyticsReports();
-  //   } catch (e) {
-  //     debugPrint("❌ Error updating status: $e");
-  //   }
-  // }
   Future<void> updateLeadStatus(int id, String status) async {
     final newStatus = status.toUpperCase();
 

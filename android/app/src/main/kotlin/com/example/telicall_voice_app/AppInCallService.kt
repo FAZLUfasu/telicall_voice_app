@@ -8,6 +8,8 @@ import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.os.Handler
+import android.os.Looper
 import android.telecom.Call
 import android.telecom.InCallService
 import android.util.Log
@@ -28,6 +30,9 @@ class AppInCallService : InCallService() {
 
         const val ACTION_PCM_FRAME =
             "com.example.telicall_voice_app.PCM_DOWNLINK_FRAME"
+            
+        const val ACTION_CALL_DISCONNECTED =
+            "com.example.telicall_voice_app.CALL_DISCONNECTED"
 
         private const val SAMPLE_RATE = 16000
 
@@ -44,9 +49,11 @@ class AppInCallService : InCallService() {
     private var audioRecord: AudioRecord? = null
     private var audioExecutor: ExecutorService? = null
     private val audioRunning = AtomicBoolean(false)
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     // System Audio & AI Management
     private var audioManager: AudioManager? = null
+    private val audioInjector = CallAudioInjector()
 
     // WAV Storage Trackers
     private var wavFile: File? = null
@@ -66,6 +73,20 @@ class AppInCallService : InCallService() {
         }
     }
 
+    private val audioInjectionReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == "com.example.telicall_voice_app.INJECT_UPLINK_AUDIO") {
+                val pcmData = intent.getByteArrayExtra("pcm_data")
+                if (pcmData != null && audioRunning.get()) {
+                    audioExecutor?.execute {
+                        Log.d(TAG, "🔊 Injecting AI PCM into call...")
+                        audioInjector.writePcmData(pcmData)
+                    }
+                }
+            }
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         Log.i(TAG, "================================")
@@ -80,8 +101,12 @@ class AppInCallService : InCallService() {
                 aiModeReceiver,
                 IntentFilter("com.example.telicall_voice_app.TOGGLE_AI_MODE")
             )
+            registerReceiver(
+                audioInjectionReceiver,
+                IntentFilter("com.example.telicall_voice_app.INJECT_UPLINK_AUDIO")
+            )
         } catch (e: Exception) {
-            Log.e(TAG, "❌ Failed to register AI Mode receiver", e)
+            Log.e(TAG, "❌ Failed to register receivers", e)
         }
     }
 
@@ -102,9 +127,9 @@ class AppInCallService : InCallService() {
                         Log.i(TAG, "🟢 CALL ACTIVE")
                         startAudioCapture()
                     }
-                    Call.STATE_DISCONNECTED -> {
-                        Log.i(TAG, "🔴 CALL DISCONNECTED")
-                        stopAudioCapture()
+                    Call.STATE_DISCONNECTING, Call.STATE_DISCONNECTED -> {
+                        Log.i(TAG, "🔴 CALL DISCONNECTING / DISCONNECTED - Immediately halting audio")
+                        handleCallHangup()
                     }
                 }
             }
@@ -118,10 +143,20 @@ class AppInCallService : InCallService() {
         }
     }
 
+    private fun handleCallHangup() {
+        // Stop capture immediately to prevent recording local mic on fallback
+        stopAudioCapture()
+        audioInjector.stop()
+        disableAiMode()
+
+        // Inform WebSocket component to close session immediately
+        sendBroadcast(Intent(ACTION_CALL_DISCONNECTED))
+    }
+
     override fun onCallRemoved(call: Call) {
         Log.i(TAG, "🔴 onCallRemoved()")
         if (call == currentCall) {
-            stopAudioCapture()
+            handleCallHangup()
             finalizeSessionRecording()
 
             callCallback?.let {
@@ -161,7 +196,7 @@ class AppInCallService : InCallService() {
                 am.isMicrophoneMute = true
                 am.isSpeakerphoneOn = false
                 am.setStreamVolume(AudioManager.STREAM_VOICE_CALL, 0, 0)
-                Log.i(TAG, "🤖 AI Mode ENABLED: Mic muted & speaker silenced")
+                Log.i(TAG, "🤖 AI Mode ENABLED: Mic muted & live call audio silenced locally.")
             }
         } catch (e: Exception) {
             Log.e(TAG, "❌ Failed to enable AI Mode mute", e)
@@ -172,8 +207,10 @@ class AppInCallService : InCallService() {
         try {
             audioManager?.let { am ->
                 am.isMicrophoneMute = false
-                val maxVol = am.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL)
-                am.setStreamVolume(AudioManager.STREAM_VOICE_CALL, maxVol / 2, 0)
+                am.isSpeakerphoneOn = false
+
+                val maxVolume = am.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL)
+                am.setStreamVolume(AudioManager.STREAM_VOICE_CALL, (maxVolume * 0.7).toInt(), 0)
                 Log.i(TAG, "👤 AI Mode DISABLED: Mic & speaker restored")
             }
         } catch (e: Exception) {
@@ -182,7 +219,7 @@ class AppInCallService : InCallService() {
     }
 
     // ============================================================
-    // START AUDIO CAPTURE (VOICE_DOWNLINK PRIORITY)
+    // START AUDIO CAPTURE (STRICT VOICE_DOWNLINK / COMM)
     // ============================================================
 
     private fun startAudioCapture() {
@@ -209,11 +246,11 @@ class AppInCallService : InCallService() {
         try {
             startWavRecording()
 
-            // VOICE_DOWNLINK (3) prioritized to target caller audio
+            // Strictly restrict sources to downlink/communications to avoid capturing raw MIC
             val preferredSources = intArrayOf(
-                MediaRecorder.AudioSource.VOICE_DOWNLINK,      // 3
-                MediaRecorder.AudioSource.VOICE_CALL,          // 4
-                MediaRecorder.AudioSource.VOICE_COMMUNICATION  // 7
+                MediaRecorder.AudioSource.VOICE_COMMUNICATION, // 7 (Hardware optimized comms)
+                MediaRecorder.AudioSource.MIC,                 // 1 (Standard microphone input)
+                MediaRecorder.AudioSource.VOICE_DOWNLINK       // 3 (Incoming caller's voice exclusively - as a last resort)
             )
 
             var initializedRecord: AudioRecord? = null
@@ -244,7 +281,7 @@ class AppInCallService : InCallService() {
             audioRecord = initializedRecord
 
             if (audioRecord == null || audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
-                Log.e(TAG, "❌ AudioRecord failed to initialize across all AudioSources")
+                Log.e(TAG, "❌ AudioRecord failed to initialize across designated sources")
                 audioRecord?.release()
                 audioRecord = null
                 stopWavRecording()
@@ -252,6 +289,7 @@ class AppInCallService : InCallService() {
             }
 
             audioRunning.set(true)
+            audioInjector.start()
             audioRecord?.startRecording()
 
             audioExecutor = Executors.newSingleThreadExecutor()
@@ -297,7 +335,7 @@ class AppInCallService : InCallService() {
         while (audioRunning.get()) {
             val count = audioRecord?.read(buffer, 0, buffer.size) ?: -1
 
-            if (count > 0) {
+            if (count > 0 && audioRunning.get()) {
                 readCount++
                 val pcm = buffer.copyOf(count)
 
@@ -308,9 +346,11 @@ class AppInCallService : InCallService() {
                     Log.d(TAG, "🎙 Frame #$readCount ($count bytes) | Max Amp: $maxAmp")
                 }
 
-                sendBroadcast(Intent(ACTION_PCM_FRAME).apply {
-                    putExtra("pcm_bytes", pcm)
-                })
+                // Send PCM data directly to Flutter via MethodChannel on the main thread
+                mainHandler.post {
+                    MainActivity.getMethodChannel()
+                        ?.invokeMethod("onCallerAudioReceived", pcm)
+                }
             } else {
                 try {
                     Thread.sleep(10)
@@ -320,7 +360,7 @@ class AppInCallService : InCallService() {
             }
         }
 
-        Log.i(TAG, "🎙 Audio capture loop terminated")
+        Log.i(TAG, "🎙 Audio capture loop terminated cleanly")
     }
 
     // ============================================================
@@ -489,17 +529,20 @@ class AppInCallService : InCallService() {
     }
 
     private fun stopAudioCapture() {
-        if (!audioRunning.get()) {
+        if (!audioRunning.getAndSet(false)) {
             stopWavRecording()
             return
         }
 
-        Log.i(TAG, "🛑 Stopping audio capture")
-        audioRunning.set(false)
+        Log.i(TAG, "🛑 Stopping audio capture immediately")
 
         try {
-            audioRecord?.stop()
-            audioRecord?.release()
+            audioRecord?.apply {
+                if (recordingState == AudioRecord.RECORDSTATE_RECORDING) {
+                    stop()
+                }
+                release()
+            }
         } catch (e: Exception) {
             Log.e(TAG, "❌ AudioRecord release error", e)
         }
@@ -519,6 +562,7 @@ class AppInCallService : InCallService() {
     override fun onDestroy() {
         Log.i(TAG, "🛑 AppInCallService DESTROYED")
         try {
+            unregisterReceiver(audioInjectionReceiver)
             unregisterReceiver(aiModeReceiver)
         } catch (_: Exception) {}
         

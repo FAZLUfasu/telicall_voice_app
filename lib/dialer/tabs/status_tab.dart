@@ -120,7 +120,7 @@ class StatusTab extends StatelessWidget {
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(8, 4, 8, 20),
         itemCount: controller.aiCallQueue.length,
-        separatorBuilder: (_, __) => const SizedBox(height: 6),
+        separatorBuilder: (_, _) => const SizedBox(height: 6),
         itemBuilder: (context, index) {
           final item = controller.aiCallQueue[index];
 
@@ -150,7 +150,7 @@ class StatusTab extends StatelessWidget {
               width: 46,
               height: 46,
               decoration: BoxDecoration(
-                color: _statusColor(status).withOpacity(0.12),
+                color: _statusColor(status).withValues(alpha: 0.12),
                 shape: BoxShape.circle,
               ),
               child: Icon(
@@ -271,7 +271,7 @@ class StatusTab extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: _statusColor(status).withOpacity(0.12),
+        color: _statusColor(status).withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(20),
       ),
       child: Text(

@@ -16,13 +16,13 @@ import android.telecom.TelecomManager
 import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 import java.io.FileOutputStream
 import java.io.RandomAccessFile
-import androidx.core.content.FileProvider
 
 class MainActivity : FlutterActivity() {
 
@@ -32,9 +32,16 @@ class MainActivity : FlutterActivity() {
 
         private const val REQUEST_CALL_PHONE = 1001
         private const val REQUEST_ANSWER_PHONE = 1002
+
+        // Fixed signature clash by backing the field and exposing via @JvmStatic getter
+        private var _methodChannel: MethodChannel? = null
+
+        @JvmStatic
+        fun getMethodChannel(): MethodChannel? {
+            return _methodChannel
+        }
     }
 
-    private var methodChannel: MethodChannel? = null
     private var callStateReceiver: BroadcastReceiver? = null
     private var isAiModeActive = false
 
@@ -48,7 +55,8 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
-        methodChannel = MethodChannel(
+        // Assign to the companion object's static backing field
+        _methodChannel = MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             CHANNEL
         )
@@ -68,24 +76,13 @@ class MainActivity : FlutterActivity() {
                     "com.example.telicall_voice_app.CALL_ANSWERED" -> {
                         println("📞 [NATIVE] CALL_ANSWERED received")
                         startNewChunkFile()
-                        methodChannel?.invokeMethod("onCallAnswered", null)
+                        getMethodChannel()?.invokeMethod("onCallAnswered", null)
                     }
 
                     "com.example.telicall_voice_app.CALL_ENDED" -> {
                         println("🔴 [NATIVE] CALL_ENDED received")
                         finalizeChunkFile()
-                        methodChannel?.invokeMethod("onCallEnded", null)
-                    }
-
-                    "com.example.telicall_voice_app.PCM_DOWNLINK_FRAME" -> {
-                        val pcm = intent.getByteArrayExtra("pcm_bytes")
-                        if (pcm != null && pcm.isNotEmpty()) {
-                            // 1. Record PCM locally to verify captured customer voice quality
-                            writePcmToChunk(pcm)
-
-                            // 2. Stream PCM to Flutter Dart layer / WebSocket pipe
-                            methodChannel?.invokeMethod("onCallerAudioReceived", pcm)
-                        }
+                        getMethodChannel()?.invokeMethod("onCallEnded", null)
                     }
                 }
             }
@@ -94,7 +91,6 @@ class MainActivity : FlutterActivity() {
         val filter = IntentFilter().apply {
             addAction("com.example.telicall_voice_app.CALL_ANSWERED")
             addAction("com.example.telicall_voice_app.CALL_ENDED")
-            addAction("com.example.telicall_voice_app.PCM_DOWNLINK_FRAME")
         }
 
         // 🔑 MUST use RECEIVER_EXPORTED on API 33+ for cross-process Telecom broadcasts
@@ -118,7 +114,7 @@ class MainActivity : FlutterActivity() {
     // ============================================================
 
     private fun setupMethodChannel() {
-        methodChannel?.setMethodCallHandler { call, result ->
+        getMethodChannel()?.setMethodCallHandler { call, result ->
             when (call.method) {
                 // ------------------------------------------------
                 // AUDIO INSPECTOR APIs
@@ -172,9 +168,7 @@ class MainActivity : FlutterActivity() {
                     result.success(success)
                 }
 
-
-                
-               "shareRecordedChunk" -> {
+                "shareRecordedChunk" -> {
                     val filePath = call.argument<String>("filePath")
                     if (filePath != null) {
                         val file = File(filePath)
@@ -189,7 +183,7 @@ class MainActivity : FlutterActivity() {
 
                                 // 2. Build explicit ACTION_SEND Intent
                                 val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                    type = "audio/x-wav" // 🔑 Works across WhatsApp, Telegram, Drive
+                                    type = "audio/x-wav" // Works across WhatsApp, Telegram, Drive
                                     putExtra(Intent.EXTRA_STREAM, uri)
                                     putExtra(Intent.EXTRA_SUBJECT, "Call Recording")
                                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -203,12 +197,12 @@ class MainActivity : FlutterActivity() {
                                 // 4. Grant explicit URI permissions to any app handling the chooser
                                 val resInfoList = packageManager.queryIntentActivities(
                                     chooserIntent,
-                                    android.content.pm.PackageManager.MATCH_DEFAULT_ONLY
+                                    PackageManager.MATCH_DEFAULT_ONLY
                                 )
                                 for (resolveInfo in resInfoList) {
-                                    val packageName = resolveInfo.activityInfo.packageName
+                                    val pkgName = resolveInfo.activityInfo.packageName
                                     grantUriPermission(
-                                        packageName,
+                                        pkgName,
                                         uri,
                                         Intent.FLAG_GRANT_READ_URI_PERMISSION
                                     )
@@ -228,6 +222,7 @@ class MainActivity : FlutterActivity() {
                         result.error("INVALID_PATH", "File path is null", null)
                     }
                 }
+                
                 // ------------------------------------------------
                 // AI AUDIO MODE
                 // ------------------------------------------------
@@ -349,7 +344,7 @@ class MainActivity : FlutterActivity() {
                     writeWavHeader(file, bytesRecordedInChunk)
                     Log.d(TAG, "✅ Saved chunk file: ${file.name} ($bytesRecordedInChunk bytes)")
                     runOnUiThread {
-                        methodChannel?.invokeMethod("onNewChunkSaved", file.absolutePath)
+                        getMethodChannel()?.invokeMethod("onNewChunkSaved", file.absolutePath)
                     }
                 }
             }
@@ -573,7 +568,7 @@ class MainActivity : FlutterActivity() {
         if (requestCode == 5001) {
             val isDialer = checkDialerRole()
             println("☎️ Dialer role result = $isDialer")
-            methodChannel?.invokeMethod("dialerRoleChanged", isDialer)
+            getMethodChannel()?.invokeMethod("dialerRoleChanged", isDialer)
         }
     }
 
@@ -587,7 +582,7 @@ class MainActivity : FlutterActivity() {
                 unregisterReceiver(it)
             } catch (_: Exception) {}
         }
-        methodChannel = null
+        _methodChannel = null
         super.onDestroy()
     }
 }
