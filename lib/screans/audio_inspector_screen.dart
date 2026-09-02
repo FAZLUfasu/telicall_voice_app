@@ -1,168 +1,3 @@
-// import 'dart:io';
-// import 'package:flutter/material.dart';
-// import 'package:flutter/services.dart';
-// import 'package:audioplayers/audioplayers.dart';
-
-// class AudioInspectorScreen extends StatefulWidget {
-//   const AudioInspectorScreen({Key? key}) : super(key: key);
-
-//   @override
-//   State<AudioInspectorScreen> createState() => _AudioInspectorScreenState();
-// }
-
-// class _AudioInspectorScreenState extends State<AudioInspectorScreen> {
-//   static const MethodChannel _telecomChannel = MethodChannel(
-//     'com.example.telicall_voice_app/telecom',
-//   );
-
-//   final AudioPlayer _audioPlayer = AudioPlayer();
-//   List<String> _chunkPaths = [];
-//   String? _currentlyPlayingPath;
-//   bool _isPlaying = false;
-
-//   @override
-//   void initState() {
-//     super.initState();
-//     _loadChunkFiles();
-
-//     // Listen for real-time newly saved audio chunks from Android
-//     _telecomChannel.setMethodCallHandler((call) async {
-//       if (call.method == 'onNewChunkSaved') {
-//         final String newPath = call.arguments.toString();
-//         setState(() {
-//           if (!_chunkPaths.contains(newPath)) {
-//             _chunkPaths.add(newPath);
-//           }
-//         });
-//       }
-//     });
-
-//     _audioPlayer.onPlayerStateChanged.listen((state) {
-//       setState(() {
-//         _isPlaying = state == PlayerState.playing;
-//       });
-//     });
-//   }
-
-//   Future<void> _loadChunkFiles() async {
-//     try {
-//       final List<dynamic> result = await _telecomChannel.invokeMethod(
-//         'getRecordedChunks',
-//       );
-//       setState(() {
-//         _chunkPaths = result.map((e) => e.toString()).toList();
-//       });
-//     } catch (e) {
-//       debugPrint("Error loading chunks: $e");
-//     }
-//   }
-
-//   Future<void> _clearChunks() async {
-//     try {
-//       await _audioPlayer.stop();
-//       await _telecomChannel.invokeMethod('clearRecordedChunks');
-//       setState(() {
-//         _chunkPaths.clear();
-//         _currentlyPlayingPath = null;
-//       });
-//     } catch (e) {
-//       debugPrint("Error clearing chunks: $e");
-//     }
-//   }
-
-//   Future<void> _playChunk(String path) async {
-//     if (_currentlyPlayingPath == path && _isPlaying) {
-//       await _audioPlayer.pause();
-//     } else {
-//       await _audioPlayer.stop();
-//       await _audioPlayer.play(DeviceFileSource(path));
-//       setState(() {
-//         _currentlyPlayingPath = path;
-//       });
-//     }
-//   }
-
-//   @override
-//   void dispose() {
-//     _audioPlayer.dispose();
-//     super.dispose();
-//   }
-
-//   @override
-//   Widget build(BuildContext context) {
-//     return Scaffold(
-//       appBar: AppBar(
-//         title: const Text("Customer Audio Inspector"),
-//         backgroundColor: Colors.indigo,
-//         actions: [
-//           IconButton(
-//             icon: const Icon(Icons.delete_forever),
-//             onPressed: _clearChunks,
-//             tooltip: "Clear All Chunks",
-//           ),
-//           IconButton(
-//             icon: const Icon(Icons.refresh),
-//             onPressed: _loadChunkFiles,
-//             tooltip: "Refresh List",
-//           ),
-//         ],
-//       ),
-//       body: _chunkPaths.isEmpty
-//           ? const Center(
-//               child: Text(
-//                 "No captured call audio chunks found.\nPlace a call to start recording customer downlink.",
-//                 textAlign: TextAlign.center,
-//                 style: TextStyle(fontSize: 16, color: Colors.grey),
-//               ),
-//             )
-//           : ListView.builder(
-//               itemCount: _chunkPaths.length,
-//               itemBuilder: (context, index) {
-//                 final filePath = _chunkPaths[index];
-//                 final fileName = filePath.split(Platform.pathSeparator).last;
-//                 final isSelected = _currentlyPlayingPath == filePath;
-
-//                 return Card(
-//                   margin: const EdgeInsets.symmetric(
-//                     horizontal: 12,
-//                     vertical: 6,
-//                   ),
-//                   color: isSelected ? Colors.indigo.shade50 : Colors.white,
-//                   child: ListTile(
-//                     leading: CircleAvatar(
-//                       backgroundColor: isSelected
-//                           ? Colors.indigo
-//                           : Colors.grey.shade300,
-//                       child: Icon(
-//                         isSelected && _isPlaying
-//                             ? Icons.pause
-//                             : Icons.play_arrow,
-//                         color: isSelected ? Colors.white : Colors.black,
-//                       ),
-//                     ),
-//                     title: Text(
-//                       fileName,
-//                       style: const TextStyle(fontWeight: FontWeight.bold),
-//                     ),
-//                     subtitle: Text(filePath, overflow: TextOverflow.ellipsis),
-//                     trailing: IconButton(
-//                       icon: Icon(
-//                         isSelected && _isPlaying
-//                             ? Icons.pause_circle_filled
-//                             : Icons.play_circle_fill,
-//                         color: Colors.indigo,
-//                         size: 36,
-//                       ),
-//                       onPressed: () => _playChunk(filePath),
-//                     ),
-//                   ),
-//                 );
-//               },
-//             ),
-//     );
-//   }
-// }
-
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -170,7 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:audioplayers/audioplayers.dart';
 
 class AudioInspectorScreen extends StatefulWidget {
-  const AudioInspectorScreen({Key? key}) : super(key: key);
+  const AudioInspectorScreen({super.key});
 
   @override
   State<AudioInspectorScreen> createState() => _AudioInspectorScreenState();
@@ -186,27 +21,11 @@ class _AudioInspectorScreenState extends State<AudioInspectorScreen> {
   List<String> _chunkPaths = [];
   String? _currentlyPlayingPath;
   bool _isPlaying = false;
-
   @override
   void initState() {
     super.initState();
 
     _loadChunkFiles();
-
-    // Listen for real-time newly saved audio chunks from Android
-    _telecomChannel.setMethodCallHandler((call) async {
-      if (call.method == 'onNewChunkSaved') {
-        final String newPath = call.arguments.toString();
-
-        if (!mounted) return;
-
-        setState(() {
-          if (!_chunkPaths.contains(newPath)) {
-            _chunkPaths.add(newPath);
-          }
-        });
-      }
-    });
 
     _audioPlayer.onPlayerStateChanged.listen((state) {
       if (!mounted) return;
@@ -216,7 +35,6 @@ class _AudioInspectorScreenState extends State<AudioInspectorScreen> {
       });
     });
   }
-
   // ============================================================
   // LOAD RECORDED FILES
   // ============================================================

@@ -1,69 +1,63 @@
-import 'dart:async';
 import 'package:flutter/foundation.dart';
-import 'package:record/record.dart';
-import 'voice_service.dart';
 
 class AudioStreamService {
   static final AudioStreamService _instance = AudioStreamService._internal();
+
   factory AudioStreamService() => _instance;
+
   AudioStreamService._internal();
 
-  final AudioRecorder _audioRecorder = AudioRecorder();
-  StreamSubscription<Uint8List>? _audioStreamSubscription;
-  bool _isRecording = false;
+  bool _isStreaming = false;
 
-  bool get isRecording => _isRecording;
+  bool get isRecording => _isStreaming;
 
+  /// Starts the customer-audio pipeline.
+  ///
+  /// IMPORTANT:
+  /// This does NOT start the Flutter microphone.
+  ///
+  /// Customer PCM is captured natively by Android using
+  /// MediaRecorder.AudioSource.VOICE_DOWNLINK.
+  ///
+  /// Android then sends the PCM to VoiceService through:
+  ///
+  /// onCustomerDownlinkAudioReceived
   Future<void> startAudioStreaming() async {
-    if (_isRecording) return;
-
-    try {
-      if (await _audioRecorder.hasPermission()) {
-        // Keeps cellular active without audio focus takeover
-        const RecordConfig config = RecordConfig(
-          encoder: AudioEncoder.pcm16bits,
-          sampleRate: 16000,
-          numChannels: 1,
-          androidConfig: AndroidRecordConfig(useLegacy: false),
-        );
-
-        final Stream<Uint8List> stream = await _audioRecorder.startStream(
-          config,
-        );
-        _isRecording = true;
-        debugPrint("🎙️ Microphone stream running. AI is listening...");
-
-        _audioStreamSubscription = stream.listen(
-          (Uint8List pcmChunk) {
-            if (VoiceService().isConnected) {
-              VoiceService().sendAudioChunk(pcmChunk);
-            }
-          },
-          onError: (error) {
-            debugPrint("❌ Audio Stream Error: $error");
-            stopAudioStreaming();
-          },
-          onDone: () => stopAudioStreaming(),
-        );
-      }
-    } catch (e) {
-      debugPrint("❌ Failed to start audio recorder stream: $e");
-      stopAudioStreaming();
+    if (_isStreaming) {
+      debugPrint("ℹ️ Customer downlink streaming already active.");
+      return;
     }
+
+    _isStreaming = true;
+
+    debugPrint("==========================================");
+    debugPrint("🎧 CUSTOMER AUDIO STREAM ACTIVE");
+    debugPrint("✅ Source: Android VOICE_DOWNLINK");
+    debugPrint("🚫 Flutter microphone capture: DISABLED");
+    debugPrint("🌐 PCM will be sent through VoiceService");
+    debugPrint("==========================================");
   }
 
+  /// Stops the Flutter-side streaming state.
+  ///
+  /// The actual VOICE_DOWNLINK AudioRecord is stopped
+  /// by AppInCallService when the cellular call ends.
   Future<void> stopAudioStreaming() async {
-    if (!_isRecording) return;
-
-    try {
-      await _audioStreamSubscription?.cancel();
-      _audioStreamSubscription = null;
-      await _audioRecorder.stop();
-    } catch (e) {
-      debugPrint("⚠️ Error stopping recorder: $e");
-    } finally {
-      _isRecording = false;
-      debugPrint("🧹 Audio Stream Stopped & Cleaned.");
+    if (!_isStreaming) {
+      return;
     }
+
+    _isStreaming = false;
+
+    debugPrint("==========================================");
+    debugPrint("🛑 CUSTOMER AUDIO STREAM STOPPED");
+    debugPrint("🚫 No Flutter microphone recorder running");
+    debugPrint("==========================================");
+  }
+
+  void reset() {
+    _isStreaming = false;
+
+    debugPrint("🧹 AudioStreamService reset.");
   }
 }

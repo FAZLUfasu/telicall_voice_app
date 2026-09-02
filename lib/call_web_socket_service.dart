@@ -87,8 +87,10 @@
 //     } catch (_) {}
 //     _channel = null;
 //     _isConnected = false;
+
 //   }
 // }
+
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';

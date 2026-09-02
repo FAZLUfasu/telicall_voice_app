@@ -19,7 +19,7 @@ class DialerController extends ChangeNotifier {
   );
   final VoiceService voiceService = VoiceService();
 
-  static const String baseUrl = "http://10.55.151.248:8000";
+  static const String baseUrl = "http://192.168.1.21:8000";
 
   int currentTabIndex = 0;
   bool isAiCallingMode = false;
@@ -57,7 +57,6 @@ class DialerController extends ChangeNotifier {
   };
 
   DialerController() {
-    _setupNativeTelecomListener();
     _initVoiceServiceCallbacks();
     requestDefaultDialerStatus();
     loadDeviceContacts();
@@ -66,20 +65,20 @@ class DialerController extends ChangeNotifier {
     searchController.addListener(filterContactsList);
   }
 
-  void _setupNativeTelecomListener() {
-    _telecomChannel.setMethodCallHandler((call) async {
-      switch (call.method) {
-        case 'onCallAnswered':
-          if (isCallActive && isAiCallingMode) {
-            voiceService.notifyCallAnswered();
-          }
-          break;
-        case 'onCallEnded':
-          handleCallEndedState();
-          break;
-      }
-    });
-  }
+  // void _setupNativeTelecomListener() {
+  //   _telecomChannel.setMethodCallHandler((call) async {
+  //     switch (call.method) {
+  //       case 'onCallAnswered':
+  //         if (isCallActive && isAiCallingMode) {
+  //           voiceService.notifyCallAnswered();
+  //         }
+  //         break;
+  //       case 'onCallEnded':
+  //         handleCallEndedState();
+  //         break;
+  //     }
+  //   });
+  // }
 
   void _initVoiceServiceCallbacks() {
     voiceService.onTokenReceived = (token) {
@@ -90,6 +89,7 @@ class DialerController extends ChangeNotifier {
           liveTranscripts.last['text'] =
               (liveTranscripts.last['text'] ?? '') + token;
         }
+
         notifyListeners();
       }
     };
@@ -97,17 +97,39 @@ class DialerController extends ChangeNotifier {
     voiceService.onTranscriptReceived = (sender, text) {
       if (isAiCallingMode) {
         liveTranscripts.add({'sender': sender, 'text': text});
+
         if (callStatus == CallStatus.ringing ||
             callStatus == CallStatus.dialing) {
           callStatus = CallStatus.inCall;
           startCallTimer();
         }
+
         notifyListeners();
       }
     };
 
     voiceService.onStateChanged = (isConnected) {
       if (!isConnected && isCallActive) {
+        handleCallEndedState();
+      }
+    };
+
+    voiceService.onCallAnswered = () {
+      debugPrint('📞 DialerController: onCallAnswered');
+
+      if (isCallActive && isAiCallingMode) {
+        if (callStatus != CallStatus.inCall) {
+          callStatus = CallStatus.inCall;
+          startCallTimer();
+          notifyListeners();
+        }
+      }
+    };
+
+    voiceService.onCallEnded = () {
+      debugPrint('📴 DialerController: onCallEnded');
+
+      if (isCallActive) {
         handleCallEndedState();
       }
     };
@@ -454,7 +476,7 @@ class DialerController extends ChangeNotifier {
       ),
     );
 
-    String backendHost = "172.26.85.2:8000";
+    String backendHost = " 10.82.144.248:8000";
     try {
       final Uri parsedUri = Uri.parse(baseUrl);
       if (parsedUri.authority.isNotEmpty) backendHost = parsedUri.authority;
