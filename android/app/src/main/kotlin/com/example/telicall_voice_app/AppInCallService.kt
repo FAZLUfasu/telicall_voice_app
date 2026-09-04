@@ -95,7 +95,7 @@ class AppInCallService : InCallService() {
          * When customer RX is proven to work,
          * change to true to start AI injection automatically.
          */
-        private const val ENABLE_AI_INJECTOR_DURING_RX_TEST = false
+        private const val ENABLE_AI_INJECTOR_DURING_RX_TEST = true
 
 
         /**

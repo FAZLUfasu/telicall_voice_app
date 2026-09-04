@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'call_web_socket_service.dart';
+import 'ai_response_wav_saver.dart';
 
 class VoiceService {
   // ================================================================
@@ -297,6 +298,9 @@ class VoiceService {
 
     final String wsUrl = "ws://$cleanHost/ws/media-stream/";
 
+    // Start a fresh Flutter-side AI audio proof buffer.
+    AiResponseWavSaver.instance.reset();
+
     debugPrint("==========================================");
     debugPrint("CONNECTING TO BACKEND");
     debugPrint(wsUrl);
@@ -339,7 +343,9 @@ class VoiceService {
       // ============================================================
 
       _channel!.stream.listen(
-        _handleBackendMessage,
+        (dynamic message) {
+          _handleBackendMessage(message);
+        },
         onError: (error) {
           debugPrint("WebSocket error: $error");
 
@@ -363,16 +369,19 @@ class VoiceService {
   // RECEIVE MESSAGE FROM BACKEND
   // ================================================================
 
-  void _handleBackendMessage(dynamic message) {
+  Future<void> _handleBackendMessage(dynamic message) async {
     // ==============================================================
     // BINARY PCM = AI VOICE
     // ==============================================================
 
     if (message is Uint8List) {
-      debugPrint(
-        "BACKEND AI PCM -> FLUTTER | "
-        "bytes=${message.length}",
-      );
+      debugPrint("==========================================");
+      debugPrint("🤖 AI PCM ARRIVED IN FLUTTER");
+      debugPrint("🤖 Source: raw WebSocket binary");
+      debugPrint("🤖 bytes=${message.length}");
+      debugPrint("==========================================");
+
+      await _saveAiPcmProof(message);
 
       _sendAiPcmToAndroid(message);
 
@@ -386,10 +395,13 @@ class VoiceService {
     if (message is List<int>) {
       final Uint8List pcmBytes = Uint8List.fromList(message);
 
-      debugPrint(
-        "BACKEND AI PCM -> FLUTTER | "
-        "bytes=${pcmBytes.length}",
-      );
+      debugPrint("==========================================");
+      debugPrint("🤖 AI PCM ARRIVED IN FLUTTER");
+      debugPrint("🤖 Source: List<int> WebSocket fallback");
+      debugPrint("🤖 bytes=${pcmBytes.length}");
+      debugPrint("==========================================");
+
+      await _saveAiPcmProof(pcmBytes);
 
       _sendAiPcmToAndroid(pcmBytes);
 
@@ -401,7 +413,7 @@ class VoiceService {
     // ==============================================================
 
     if (message is String) {
-      _handleBackendTextMessage(message);
+      await _handleBackendTextMessage(message);
 
       return;
     }
@@ -410,6 +422,43 @@ class VoiceService {
       "Unknown backend message type: "
       "${message.runtimeType}",
     );
+  }
+
+  // ================================================================
+  // SAVE AI PCM INSIDE FLUTTER FOR PROOF
+  // ================================================================
+
+  Future<void> _saveAiPcmProof(Uint8List pcmBytes) async {
+    if (pcmBytes.isEmpty) {
+      debugPrint("⚠️ [AI WAV PROOF] Empty AI PCM received.");
+      return;
+    }
+
+    try {
+      // Keep all AI response PCM for one combined session WAV.
+      AiResponseWavSaver.instance.appendPcm(pcmBytes);
+
+      // Also save each backend AI PCM packet as its own WAV.
+      final String? savedPath = await AiResponseWavSaver.instance
+          .saveSingleChunk(pcmBytes, prefix: "ai_from_backend");
+
+      debugPrint("==========================================");
+      debugPrint("✅ [AI PCM CONFIRMED INSIDE FLUTTER]");
+      debugPrint("🎧 PCM bytes = ${pcmBytes.length}");
+      debugPrint("💾 WAV path = $savedPath");
+      debugPrint(
+        "📦 Combined buffered bytes = "
+        "${AiResponseWavSaver.instance.bufferedBytes}",
+      );
+      debugPrint(
+        "🧩 Combined chunk count = "
+        "${AiResponseWavSaver.instance.chunkCount}",
+      );
+      debugPrint("==========================================");
+    } catch (e, stackTrace) {
+      debugPrint("❌ [AI WAV PROOF ERROR]: $e");
+      debugPrint("$stackTrace");
+    }
   }
 
   // ================================================================
@@ -437,7 +486,7 @@ class VoiceService {
   // HANDLE TEXT MESSAGE FROM BACKEND
   // ================================================================
 
-  void _handleBackendTextMessage(String message) {
+  Future<void> _handleBackendTextMessage(String message) async {
     try {
       final dynamic decoded = jsonDecode(message);
 
@@ -461,10 +510,13 @@ class VoiceService {
             data['pcm_base64'].toString(),
           );
 
-          debugPrint(
-            "BASE64 AI PCM -> FLUTTER | "
-            "bytes=${pcmBytes.length}",
-          );
+          debugPrint("==========================================");
+          debugPrint("🤖 AI PCM ARRIVED IN FLUTTER");
+          debugPrint("🤖 Source: BASE64 backend message");
+          debugPrint("🤖 bytes=${pcmBytes.length}");
+          debugPrint("==========================================");
+
+          await _saveAiPcmProof(pcmBytes);
 
           _sendAiPcmToAndroid(pcmBytes);
         } catch (e) {
@@ -585,6 +637,33 @@ class VoiceService {
   }
 
   // ================================================================
+  // SAVE COMBINED AI SESSION WAV
+  // ================================================================
+
+  Future<void> _saveCombinedAiSessionWav() async {
+    try {
+      if (AiResponseWavSaver.instance.bufferedBytes <= 0) {
+        debugPrint("⚠️ [AI SESSION WAV] No buffered AI PCM to save.");
+        return;
+      }
+
+      final String? sessionPath = await AiResponseWavSaver.instance.saveSession(
+        prefix: "ai_flutter_session",
+      );
+
+      debugPrint("==========================================");
+      debugPrint("✅ [AI SESSION WAV SAVED FROM FLUTTER]");
+      debugPrint("💾 PATH: $sessionPath");
+      debugPrint("==========================================");
+
+      AiResponseWavSaver.instance.reset();
+    } catch (e, stackTrace) {
+      debugPrint("❌ [AI SESSION WAV SAVE ERROR]: $e");
+      debugPrint("$stackTrace");
+    }
+  }
+
+  // ================================================================
   // DISCONNECT SESSION
   // ================================================================
 
@@ -601,6 +680,9 @@ class VoiceService {
     debugPrint("==========================================");
     debugPrint("DISCONNECTING VOICE SESSION");
     debugPrint("==========================================");
+
+    // Save one combined Flutter-side AI WAV for the complete session.
+    _saveCombinedAiSessionWav();
 
     final WebSocketChannel? oldChannel = _channel;
 

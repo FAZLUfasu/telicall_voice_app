@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:telicall_voice_app/screans/ai_response_inspector_screen.dart';
 
 import 'dialer_controller.dart';
 import 'widgets/mode_toggle_switch.dart';
@@ -12,7 +13,6 @@ import 'tabs/recents_tab.dart';
 import 'tabs/contacts_tab.dart';
 
 import '../screans/audio_inspector_screen.dart';
-import '../screans/ai_response_inspector_screen.dart';
 import '../screans/profile_management_screen.dart';
 import '../screans/settings_screen.dart';
 
