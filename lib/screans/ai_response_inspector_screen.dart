@@ -71,92 +71,92 @@ class _AiResponseInspectorScreenState
     // LISTEN FOR NEW AI RESPONSE FILE
     // ==========================================================
 
-    _telecomChannel.setMethodCallHandler(
-      (call) async {
+    // _telecomChannel.setMethodCallHandler(
+    //   (call) async {
 
-        // --------------------------------------------------------
-        // NEW AI RESPONSE SAVED BY CallAiResponseRecorder.kt
-        // --------------------------------------------------------
+    //     // --------------------------------------------------------
+    //     // NEW AI RESPONSE SAVED BY CallAiResponseRecorder.kt
+    //     // --------------------------------------------------------
 
-        if (
-          call.method ==
-              'onAiResponseAudioCreated'
-        ) {
+    //     if (
+    //       call.method ==
+    //           'onAiResponseAudioCreated'
+    //     ) {
 
-          final args =
-              call.arguments;
-
-
-          String? newPath;
+    //       final args =
+    //           call.arguments;
 
 
-          // ======================================================
-          // EXPECTING MAP FROM KOTLIN
-          //
-          // mapOf(
-          //   "filePath" to filePath,
-          //   "responseNumber" to responseNumber,
-          //   "durationMs" to durationMs,
-          //   "audioBytes" to audioBytes
-          // )
-          // ======================================================
-
-          if (
-            args is Map
-          ) {
-
-            newPath =
-                args['filePath']
-                    ?.toString();
-          } else {
-
-            // Fallback if only filePath is sent.
-            newPath =
-                args?.toString();
-          }
+    //       String? newPath;
 
 
-          if (
-            newPath == null ||
-            newPath.isEmpty
-          ) {
+    //       // ======================================================
+    //       // EXPECTING MAP FROM KOTLIN
+    //       //
+    //       // mapOf(
+    //       //   "filePath" to filePath,
+    //       //   "responseNumber" to responseNumber,
+    //       //   "durationMs" to durationMs,
+    //       //   "audioBytes" to audioBytes
+    //       // )
+    //       // ======================================================
 
-            return;
-          }
+    //       if (
+    //         args is Map
+    //       ) {
 
+    //         newPath =
+    //             args['filePath']
+    //                 ?.toString();
+    //       } else {
 
-          if (
-            !mounted
-          ) {
-
-            return;
-          }
-
-
-          setState(() {
-
-            if (
-              !_aiResponsePaths
-                  .contains(
-                    newPath,
-                  )
-            ) {
-
-              // Newest AI response first.
-              _aiResponsePaths.insert(
-                0,
-                newPath!,
-              );
-            }
-          });
+    //         // Fallback if only filePath is sent.
+    //         newPath =
+    //             args?.toString();
+    //       }
 
 
-          debugPrint(
-            '🤖 New AI response received: $newPath',
-          );
-        }
-      },
-    );
+    //       if (
+    //         newPath == null ||
+    //         newPath.isEmpty
+    //       ) {
+
+    //         return;
+    //       }
+
+
+    //       if (
+    //         !mounted
+    //       ) {
+
+    //         return;
+    //       }
+
+
+    //       setState(() {
+
+    //         if (
+    //           !_aiResponsePaths
+    //               .contains(
+    //                 newPath,
+    //               )
+    //         ) {
+
+    //           // Newest AI response first.
+    //           _aiResponsePaths.insert(
+    //             0,
+    //             newPath!,
+    //           );
+    //         }
+    //       });
+
+
+    //       debugPrint(
+    //         '🤖 New AI response received: $newPath',
+    //       );
+    //     }
+    //   },
+    // );
 
 
     // ==========================================================

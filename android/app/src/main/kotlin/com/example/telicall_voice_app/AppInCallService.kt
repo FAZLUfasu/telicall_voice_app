@@ -1343,7 +1343,7 @@ class AppInCallService : InCallService() {
     // CUSTOMER DOWNLINK CAPTURE LOOP
     // ================================================================
 
-private fun audioCaptureLoop() {
+                    private fun audioCaptureLoop() {
 
                     val buffer = ByteArray(2048)
 
@@ -1437,77 +1437,145 @@ private fun audioCaptureLoop() {
                                 )
                             }
 
-                            // ====================================================
-                            // CUSTOMER PCM → FLUTTER
-                            // ====================================================
+                        // ====================================================
+                        // CUSTOMER PCM → FLUTTER
+                        // ====================================================
 
-                            if (!callEnded.get()) {
+                        if (!callEnded.get() && audioRunning.get()) {
 
-                                val channel =
-                                    MainActivity.getMethodChannel()
+                            val channel =
+                                MainActivity.getMethodChannel()
 
-                                if (channel == null) {
+                            if (channel == null) {
 
-                                    Log.e(
+                                Log.e(
+                                    TAG,
+                                    "❌ CUSTOMER PCM NOT SENT | " +
+                                            "MethodChannel=NULL"
+                                )
+
+                            } else {
+
+                                // IMPORTANT:
+                                // Make a copy of the PCM data before posting
+                                // to the main thread.
+                                //
+                                // This prevents the AudioRecord buffer from
+                                // being overwritten before Flutter receives it.
+                                val pcmCopy =
+                                    customerPcm.copyOf()
+
+                                val currentFrame =
+                                    readCount
+
+                                if (currentFrame % 5 == 0) {
+
+                                    Log.d(
                                         TAG,
-                                        "❌ CUSTOMER PCM NOT SENT | " +
-                                                "MethodChannel=NULL"
+                                        "📤 CUSTOMER PCM → FLUTTER | " +
+                                                "frame=$currentFrame | " +
+                                                "bytes=${pcmCopy.size}"
                                     )
+                                }
 
-                                } else {
+                                mainHandler.post {
 
-                                    if (readCount % 5 == 0) {
+                                    // Check again because call state may have
+                                    // changed while waiting for main thread.
+                                    if (
+                                        callEnded.get() ||
+                                        !audioRunning.get()
+                                    ) {
 
-                                        Log.d(
-                                            TAG,
-                                            "📤 CUSTOMER PCM → METHODCHANNEL | " +
-                                                    "frame=$readCount | " +
-                                                    "bytes=${customerPcm.size}"
-                                        )
+                                        if (currentFrame % 5 == 0) {
+
+                                            Log.w(
+                                                TAG,
+                                                "⚠️ CUSTOMER PCM SEND CANCELLED | " +
+                                                        "frame=$currentFrame | " +
+                                                        "callEnded=${callEnded.get()} | " +
+                                                        "audioRunning=${audioRunning.get()}"
+                                            )
+                                        }
+
+                                        return@post
                                     }
 
-                                    mainHandler.post {
+                                    try {
 
-                                        if (
-                                            callEnded.get() ||
-                                            !audioRunning.get()
-                                        ) {
+                                        channel.invokeMethod(
+                                            "onCustomerDownlinkAudioReceived",
+                                            pcmCopy,
+                                            object :
+                                                io.flutter.plugin.common.MethodChannel.Result {
 
-                                            return@post
-                                        }
+                                                override fun success(
+                                                    result: Any?
+                                                ) {
 
-                                        try {
+                                                    if (
+                                                        currentFrame % 5 == 0
+                                                    ) {
 
-                                            channel.invokeMethod(
-                                                "onCustomerDownlinkAudioReceived",
-                                                customerPcm
-                                            )
+                                                        Log.d(
+                                                            TAG,
+                                                            "✅ FLUTTER ACK CUSTOMER PCM | " +
+                                                                    "frame=$currentFrame | " +
+                                                                    "bytes=${pcmCopy.size} | " +
+                                                                    "result=$result"
+                                                        )
+                                                    }
+                                                }
 
-                                            if (
-                                                readCount % 5 == 0
-                                            ) {
+                                                override fun error(
+                                                    errorCode: String,
+                                                    errorMessage: String?,
+                                                    errorDetails: Any?
+                                                ) {
 
-                                                Log.d(
-                                                    TAG,
-                                                    "✅ invokeMethod completed | " +
-                                                            "frame=$readCount | " +
-                                                            "bytes=${customerPcm.size}"
-                                                )
+                                                    Log.e(
+                                                        TAG,
+                                                        "❌ FLUTTER CUSTOMER PCM ERROR | " +
+                                                                "frame=$currentFrame | " +
+                                                                "code=$errorCode | " +
+                                                                "message=$errorMessage | " +
+                                                                "details=$errorDetails"
+                                                    )
+                                                }
+
+                                                override fun notImplemented() {
+
+                                                    Log.e(
+                                                        TAG,
+                                                        "❌ FLUTTER METHOD NOT IMPLEMENTED | " +
+                                                                "frame=$currentFrame | " +
+                                                                "method=" +
+                                                                "onCustomerDownlinkAudioReceived"
+                                                    )
+                                                }
                                             }
+                                        )
 
-                                        } catch (
-                                            e: Exception
-                                        ) {
+                                    } catch (
+                                        e: Exception
+                                    ) {
 
-                                            Log.e(
-                                                TAG,
-                                                "❌ CUSTOMER PCM invokeMethod exception",
-                                                e
-                                            )
-                                        }
+                                        Log.e(
+                                            TAG,
+                                            "❌ CUSTOMER PCM invokeMethod exception | " +
+                                                    "frame=$currentFrame | " +
+                                                    "bytes=${pcmCopy.size}",
+                                            e
+                                        )
                                     }
                                 }
                             }
+                        
+
+                        }
+                        // ====================================================
+                        // AUDIORECORD ERROR HANDLING
+                        // ====================================================
 
                         } else if (
                             count ==
@@ -1545,7 +1613,9 @@ private fun audioCaptureLoop() {
 
                             break
 
-                        } else if (count < 0) {
+                        } else if (
+                            count < 0
+                        ) {
 
                             Log.e(
                                 TAG,
@@ -1554,6 +1624,10 @@ private fun audioCaptureLoop() {
 
                             break
                         }
+
+                        // ====================================================
+                        // SMALL LOOP DELAY
+                        // ====================================================
 
                         try {
 
@@ -1566,17 +1640,27 @@ private fun audioCaptureLoop() {
                             Thread.currentThread()
                                 .interrupt()
 
+                            Log.w(
+                                TAG,
+                                "⚠️ CUSTOMER RX thread interrupted"
+                            )
+
                             break
                         }
-                    }
 
-                    Log.i(
-                        TAG,
-                        "🎙 CUSTOMER RX LOOP TERMINATED | " +
-                                "frames=$readCount | " +
-                                "bytes=$totalBytes"
-                    )
-                }
+                        }
+
+// ====================================================
+// CUSTOMER RX LOOP FINISHED
+// ====================================================
+
+Log.i(
+    TAG,
+    "🎙 CUSTOMER RX LOOP TERMINATED | " +
+            "frames=$readCount | " +
+            "bytes=$totalBytes"
+)
+    }
     // ================================================================
     // START AI INJECTOR
     // ================================================================

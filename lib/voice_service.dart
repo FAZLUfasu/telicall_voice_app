@@ -1,6 +1,4 @@
 import 'dart:convert';
-import 'dart:typed_data';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -70,99 +68,93 @@ class VoiceService {
 
   void initializeNativeListeners() {
     if (_nativeListenersInitialized) {
-      debugPrint("ℹ️ VoiceService native listener already initialized.");
+      debugPrint("VoiceService native listener already initialized.");
       return;
     }
 
     _nativeListenersInitialized = true;
 
     debugPrint("==========================================");
-    debugPrint("🎧 VoiceService native listener initializing");
+    debugPrint("VoiceService native listener initializing");
     debugPrint("==========================================");
 
     _telecomChannel.setMethodCallHandler((MethodCall call) async {
-      debugPrint("📲 Native event received: ${call.method}");
+      debugPrint("Native event received: ${call.method}");
 
       switch (call.method) {
         // ========================================================
         // CALL ANSWERED
         // ========================================================
         case 'onCallAnswered':
-          debugPrint("📞 CALL ANSWERED event received from Android");
+          debugPrint("CALL ANSWERED event received from Android");
 
-          // Existing VoiceService logic
           notifyCallAnswered();
 
-          // Inform DialerController/UI
           onCallAnswered?.call();
 
-          break;
+          return true;
 
         // ========================================================
         // CALL ENDED
         // ========================================================
         case 'onCallEnded':
-          debugPrint("📴 CALL ENDED event received from Android");
+          debugPrint("CALL ENDED event received from Android");
 
-          // Inform DialerController/UI first
           onCallEnded?.call();
 
-          // Then close backend session
           disconnectSession();
 
-          break;
+          return true;
 
         // ========================================================
         // CUSTOMER VOICE FROM ANDROID VOICE_DOWNLINK
         // ========================================================
         case 'onCustomerDownlinkAudioReceived':
-          debugPrint("🎧 CUSTOMER DOWNLINK EVENT RECEIVED IN VOICESERVICE");
+          debugPrint("CUSTOMER DOWNLINK EVENT RECEIVED IN VOICESERVICE");
 
-          _handleCustomerDownlinkAudio(call.arguments);
+          final bool sent = _handleCustomerDownlinkAudio(call.arguments);
 
-          break;
+          return sent;
 
         // ========================================================
         // AI RESPONSE FILE CREATED
         // ========================================================
         case 'onAiResponseAudioCreated':
-          debugPrint("🤖 AI response recording created:");
+          debugPrint("AI response recording created:");
           debugPrint("${call.arguments}");
 
-          break;
+          return true;
 
         // ========================================================
         // CUSTOMER RECORDING CREATED
         // ========================================================
         case 'onNewChunkSaved':
-          debugPrint("💾 Customer audio recording saved:");
+          debugPrint("Customer audio recording saved:");
           debugPrint("${call.arguments}");
 
-          break;
+          return true;
 
         // ========================================================
         // UNKNOWN EVENT
         // ========================================================
         default:
-          debugPrint("ℹ️ Unhandled native MethodChannel event: ${call.method}");
+          debugPrint("Unhandled native MethodChannel event: ${call.method}");
 
-          break;
+          return null;
       }
     });
 
-    debugPrint("✅ VoiceService native listener initialized");
+    debugPrint("VoiceService native listener initialized");
   }
 
   // ================================================================
   // HANDLE CUSTOMER DOWNLINK PCM
   // ================================================================
 
-  void _handleCustomerDownlinkAudio(dynamic arguments) {
+  bool _handleCustomerDownlinkAudio(dynamic arguments) {
     debugPrint("==========================================");
-
-    debugPrint("📥 CUSTOMER DOWNLINK CALLBACK ENTERED");
-
-    debugPrint("📥 Native argument type: ${arguments.runtimeType}");
+    debugPrint("CUSTOMER DOWNLINK CALLBACK ENTERED");
+    debugPrint("Native argument type: ${arguments.runtimeType}");
 
     Uint8List? pcmBytes;
 
@@ -171,82 +163,107 @@ class VoiceService {
     } else if (arguments is List<int>) {
       pcmBytes = Uint8List.fromList(arguments);
     } else {
-      debugPrint(
-        "❌ Invalid CUSTOMER PCM type: "
-        "${arguments.runtimeType}",
-      );
+      debugPrint("Invalid CUSTOMER PCM type: ${arguments.runtimeType}");
 
-      return;
+      return false;
     }
 
     if (pcmBytes.isEmpty) {
-      debugPrint("❌ CUSTOMER PCM is EMPTY");
+      debugPrint("CUSTOMER PCM is EMPTY");
 
-      return;
+      return false;
     }
 
     debugPrint(
-      "🎧 CUSTOMER DOWNLINK → FLUTTER | "
+      "CUSTOMER DOWNLINK -> FLUTTER | "
       "bytes=${pcmBytes.length}",
     );
 
     debugPrint(
-      "🔍 WEBSOCKET STATE | "
+      "WEBSOCKET STATE | "
       "connected=$_isConnected | "
       "channel=${_channel != null}",
     );
 
     if (!_isConnected) {
       debugPrint(
-        "❌ CUSTOMER PCM CANNOT BE SENT | "
+        "CUSTOMER PCM CANNOT BE SENT | "
         "backend disconnected",
       );
 
-      return;
+      return false;
     }
 
     if (_channel == null) {
       debugPrint(
-        "❌ CUSTOMER PCM CANNOT BE SENT | "
+        "CUSTOMER PCM CANNOT BE SENT | "
         "WebSocket channel NULL",
       );
 
-      return;
+      return false;
     }
 
-    sendCustomerAudioChunk(pcmBytes);
+    final bool sent = sendCustomerAudioChunk(pcmBytes);
+
+    debugPrint(
+      "CUSTOMER PCM -> WS | "
+      "bytes=${pcmBytes.length} | "
+      "sent=$sent",
+    );
+
+    debugPrint("==========================================");
+
+    return sent;
   }
+
   // ================================================================
   // SEND CUSTOMER PCM TO BACKEND
   // ================================================================
 
-  void sendCustomerAudioChunk(Uint8List pcmBytes) {
+  bool sendCustomerAudioChunk(Uint8List pcmBytes) {
     debugPrint(
-      "🔍 SEND CHECK | "
+      "SEND CHECK | "
       "connected=$_isConnected | "
       "channel=${_channel != null} | "
       "bytes=${pcmBytes.length}",
     );
 
-    if (!_isConnected) {
-      debugPrint("❌ CUSTOMER PCM NOT SENT: WebSocket disconnected");
-      return;
+    if (pcmBytes.isEmpty) {
+      debugPrint("CUSTOMER PCM NOT SENT: empty PCM buffer");
+
+      return false;
     }
 
-    if (_channel == null) {
-      debugPrint("❌ CUSTOMER PCM NOT SENT: WebSocket channel NULL");
-      return;
+    if (!_isConnected) {
+      debugPrint("CUSTOMER PCM NOT SENT: WebSocket disconnected");
+
+      return false;
+    }
+
+    final WebSocketChannel? channel = _channel;
+
+    if (channel == null) {
+      debugPrint("CUSTOMER PCM NOT SENT: WebSocket channel NULL");
+
+      return false;
     }
 
     try {
-      _channel!.sink.add(pcmBytes);
+      // Send RAW PCM as a binary WebSocket frame.
+      channel.sink.add(pcmBytes);
 
       debugPrint(
-        "🌐 CUSTOMER PCM → BACKEND | "
+        "CUSTOMER PCM -> BACKEND | "
         "${pcmBytes.length} bytes",
       );
-    } catch (e) {
-      debugPrint("❌ CUSTOMER PCM SEND ERROR: $e");
+
+      return true;
+    } catch (e, stackTrace) {
+      debugPrint("CUSTOMER PCM SEND ERROR: $e");
+
+      debugPrint("$stackTrace");
+
+      return false;
     }
   }
 
@@ -260,7 +277,7 @@ class VoiceService {
     String? details,
   }) {
     if (_isConnected || _channel != null) {
-      debugPrint("ℹ️ Existing WebSocket session found. Closing first.");
+      debugPrint("Existing WebSocket session found. Closing first.");
 
       disconnectSession();
     }
@@ -281,11 +298,8 @@ class VoiceService {
     final String wsUrl = "ws://$cleanHost/ws/media-stream/";
 
     debugPrint("==========================================");
-
-    debugPrint("🌐 CONNECTING TO BACKEND");
-
-    debugPrint("🌐 $wsUrl");
-
+    debugPrint("CONNECTING TO BACKEND");
+    debugPrint(wsUrl);
     debugPrint("==========================================");
 
     try {
@@ -295,7 +309,7 @@ class VoiceService {
 
       onStateChanged?.call(true);
 
-      debugPrint("✅ WebSocket connection created");
+      debugPrint("WebSocket connection created");
 
       // ============================================================
       // SEND INITIAL CUSTOMER / LEAD DATA
@@ -308,14 +322,14 @@ class VoiceService {
         }),
       );
 
-      debugPrint("📱 Customer metadata → backend");
+      debugPrint("Customer metadata -> backend");
 
       // ============================================================
       // FLUSH PENDING CALL ANSWER EVENT
       // ============================================================
 
       if (_pendingCallAnswered) {
-        debugPrint("📞 Flushing queued call_answered event");
+        debugPrint("Flushing queued call_answered event");
 
         notifyCallAnswered();
       }
@@ -327,19 +341,19 @@ class VoiceService {
       _channel!.stream.listen(
         _handleBackendMessage,
         onError: (error) {
-          debugPrint("❌ WebSocket error: $error");
+          debugPrint("WebSocket error: $error");
 
           disconnectSession();
         },
         onDone: () {
-          debugPrint("🔌 WebSocket connection closed by server");
+          debugPrint("WebSocket connection closed by server");
 
           disconnectSession();
         },
         cancelOnError: false,
       );
     } catch (e) {
-      debugPrint("❌ WebSocket connection exception: $e");
+      debugPrint("WebSocket connection exception: $e");
 
       disconnectSession();
     }
@@ -356,7 +370,7 @@ class VoiceService {
 
     if (message is Uint8List) {
       debugPrint(
-        "🔊 BACKEND AI PCM → FLUTTER | "
+        "BACKEND AI PCM -> FLUTTER | "
         "bytes=${message.length}",
       );
 
@@ -373,7 +387,7 @@ class VoiceService {
       final Uint8List pcmBytes = Uint8List.fromList(message);
 
       debugPrint(
-        "🔊 BACKEND AI PCM → FLUTTER | "
+        "BACKEND AI PCM -> FLUTTER | "
         "bytes=${pcmBytes.length}",
       );
 
@@ -392,7 +406,10 @@ class VoiceService {
       return;
     }
 
-    debugPrint("⚠️ Unknown backend message type: ${message.runtimeType}");
+    debugPrint(
+      "Unknown backend message type: "
+      "${message.runtimeType}",
+    );
   }
 
   // ================================================================
@@ -406,13 +423,13 @@ class VoiceService {
 
     try {
       debugPrint(
-        "🔊 AI PCM → CallWebSocketService | "
+        "AI PCM -> CallWebSocketService | "
         "bytes=${pcmBytes.length}",
       );
 
       _audioInjectorService.onReceiveTtsAudioChunk(pcmBytes);
     } catch (e) {
-      debugPrint("❌ Failed forwarding AI PCM to injector: $e");
+      debugPrint("Failed forwarding AI PCM to injector: $e");
     }
   }
 
@@ -425,7 +442,7 @@ class VoiceService {
       final dynamic decoded = jsonDecode(message);
 
       if (decoded is! Map<String, dynamic>) {
-        debugPrint("ℹ️ Backend text: $message");
+        debugPrint("Backend text: $message");
 
         onTokenReceived?.call(message);
 
@@ -445,13 +462,13 @@ class VoiceService {
           );
 
           debugPrint(
-            "🔊 BASE64 AI PCM → FLUTTER | "
+            "BASE64 AI PCM -> FLUTTER | "
             "bytes=${pcmBytes.length}",
           );
 
           _sendAiPcmToAndroid(pcmBytes);
         } catch (e) {
-          debugPrint("❌ Invalid BASE64 AI PCM: $e");
+          debugPrint("Invalid BASE64 AI PCM: $e");
         }
 
         return;
@@ -481,7 +498,7 @@ class VoiceService {
         final String text = data['text']?.toString() ?? '';
 
         if (text.isNotEmpty) {
-          debugPrint("🗣️ CUSTOMER: $text");
+          debugPrint("CUSTOMER: $text");
 
           onTranscriptReceived?.call("Customer", text);
         }
@@ -497,7 +514,7 @@ class VoiceService {
         final String text = data['text']?.toString() ?? '';
 
         if (text.isNotEmpty) {
-          debugPrint("🤖 AI: $text");
+          debugPrint("AI: $text");
 
           onTranscriptReceived?.call("AI", text);
         }
@@ -509,13 +526,13 @@ class VoiceService {
       // OTHER BACKEND EVENT
       // ============================================================
 
-      debugPrint("📨 Backend JSON event: $data");
+      debugPrint("Backend JSON event: $data");
     } catch (e) {
       /*
        * Backend sent normal text instead of JSON.
        */
 
-      debugPrint("📨 Backend text message: $message");
+      debugPrint("Backend text message: $message");
 
       onTokenReceived?.call(message);
     }
@@ -534,14 +551,14 @@ class VoiceService {
 
         _pendingCallAnswered = false;
 
-        debugPrint("✅ call_answered → backend");
+        debugPrint("call_answered -> backend");
       } catch (e) {
-        debugPrint("❌ Failed sending call_answered: $e");
+        debugPrint("Failed sending call_answered: $e");
 
         _pendingCallAnswered = true;
       }
     } else {
-      debugPrint("⏳ WebSocket not ready. Queueing call_answered.");
+      debugPrint("WebSocket not ready. Queueing call_answered.");
 
       _pendingCallAnswered = true;
     }
@@ -561,9 +578,9 @@ class VoiceService {
         jsonEncode({"event": "call_state_changed", "state": state}),
       );
 
-      debugPrint("📱 CALL STATE → BACKEND: $state");
+      debugPrint("CALL STATE -> BACKEND: $state");
     } catch (e) {
-      debugPrint("❌ Failed sending call state: $e");
+      debugPrint("Failed sending call state: $e");
     }
   }
 
@@ -582,9 +599,7 @@ class VoiceService {
     }
 
     debugPrint("==========================================");
-
-    debugPrint("🔌 DISCONNECTING VOICE SESSION");
-
+    debugPrint("DISCONNECTING VOICE SESSION");
     debugPrint("==========================================");
 
     final WebSocketChannel? oldChannel = _channel;
@@ -600,9 +615,9 @@ class VoiceService {
     try {
       oldChannel?.sink.close();
     } catch (e) {
-      debugPrint("⚠️ Error closing WebSocket: $e");
+      debugPrint("Error closing WebSocket: $e");
     }
 
-    debugPrint("✅ VoiceService session disconnected");
+    debugPrint("VoiceService session disconnected");
   }
 }

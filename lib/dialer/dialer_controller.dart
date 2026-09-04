@@ -19,7 +19,7 @@ class DialerController extends ChangeNotifier {
   );
   final VoiceService voiceService = VoiceService();
 
-  static const String baseUrl = "http://192.168.1.21:8000";
+  static const String baseUrl = "http://10.130.124.248:8000";
 
   int currentTabIndex = 0;
   bool isAiCallingMode = false;
